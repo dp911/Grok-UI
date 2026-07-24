@@ -11,6 +11,7 @@ import type {
   SessionRow,
   SessionStatus,
 } from './types.js'
+import { SessionStateStore } from './session-state.js'
 
 type Json = Record<string, unknown>
 
@@ -185,6 +186,7 @@ async function sessionFromSummary(summaryFile: string): Promise<{
       contextUsage: Math.max(0, Math.min(1, rawContextUsage > 1 ? rawContextUsage / 100 : rawContextUsage)),
       status: statusFor(updatedAt, errors),
       diskBytes: bytes,
+      archived: false,
     },
     tools: asStringArray(signals.toolsUsed),
     models: models.length ? models : [primaryModel],
@@ -304,8 +306,15 @@ export class GrokStore {
   readonly grokHome: string
   private cache: { at: number; payload: DashboardPayload } | null = null
 
-  constructor(grokHome = process.env.GROK_HOME || path.join(os.homedir(), '.grok')) {
+  constructor(
+    grokHome = process.env.GROK_HOME || path.join(os.homedir(), '.grok'),
+    private readonly sessionState?: SessionStateStore,
+  ) {
     this.grokHome = path.resolve(grokHome)
+  }
+
+  invalidate(): void {
+    this.cache = null
   }
 
   async dashboard(force = false): Promise<DashboardPayload> {
@@ -320,7 +329,8 @@ export class GrokStore {
       directorySize(this.grokHome, 4),
       readJson(path.join(this.grokHome, 'version.json')),
     ])
-    const sessions = sessionData.map((item) => item.row)
+    const sessions = sessionData.map((item) =>
+      this.sessionState?.apply(item.row) || item.row)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     const models = new Map<string, number>()
     const tools = new Map<string, number>()

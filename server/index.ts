@@ -6,12 +6,19 @@ import { LiveMonitor } from './live-monitor.js'
 import { GrokController } from './grok-controller.js'
 import { SecurityGate } from './security.js'
 import { WorkspaceInspector } from './workspace-inspector.js'
+import { SessionStateStore } from './session-state.js'
+import { mergeSessionFeed, SessionReader } from './session-reader.js'
+import type { ControlSession, LiveAgent, SessionRow } from './types.js'
 
 const app = express()
-const store = new GrokStore()
+const sessionState = new SessionStateStore()
+await sessionState.load()
+const store = new GrokStore(undefined, sessionState)
 const liveMonitor = new LiveMonitor(store)
-const controller = new GrokController()
+const controller = new GrokController(sessionState)
+await controller.restore()
 const workspaceInspector = new WorkspaceInspector()
+const sessionReader = new SessionReader(store.grokHome)
 const port = Number(process.env.PORT || 4310)
 const host = process.env.HOST || '127.0.0.1'
 const security = new SecurityGate(host)
@@ -108,11 +115,83 @@ app.post('/api/control/permissions/:id', (request, response) => {
   response.json({ resolved: true })
 })
 
+function controlRow(session: ControlSession): SessionRow {
+  return {
+    id: session.id,
+    title: session.title,
+    summary: '',
+    cwd: session.cwd,
+    workspace: path.basename(session.cwd) || session.cwd,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    model: session.model || 'Grok default',
+    agent: 'Grok UI',
+    reasoningEffort: 'default',
+    sandboxProfile: 'native permissions',
+    messages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
+    chatMessages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
+    turns: session.feed.filter((item) => item.type === 'user').length,
+    toolCalls: session.feed.filter((item) => item.type === 'tool').length,
+    errors: session.state === 'failed' ? 1 : 0,
+    filesTouched: 0,
+    linesAdded: 0,
+    linesRemoved: 0,
+    durationSeconds: Math.max(0, (Date.now() - new Date(session.createdAt).getTime()) / 1_000),
+    contextUsage: 0,
+    status: session.state === 'attention'
+      ? 'attention'
+      : session.state === 'working' || session.state === 'starting' ? 'live' : 'recent',
+    diskBytes: 0,
+    archived: false,
+  }
+}
+
+function liveRow(session: LiveAgent): SessionRow {
+  return {
+    id: session.id,
+    title: session.title,
+    summary: '',
+    cwd: session.cwd,
+    workspace: session.workspace,
+    createdAt: session.openedAt,
+    updatedAt: session.updatedAt,
+    model: session.model,
+    agent: 'Grok CLI',
+    reasoningEffort: 'default',
+    sandboxProfile: 'CLI process',
+    messages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
+    chatMessages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
+    turns: session.turns,
+    toolCalls: session.toolCalls,
+    errors: 0,
+    filesTouched: 0,
+    linesAdded: 0,
+    linesRemoved: 0,
+    durationSeconds: Math.max(0, (Date.now() - new Date(session.openedAt).getTime()) / 1_000),
+    contextUsage: session.contextUsage,
+    status: session.state === 'attention'
+      ? 'attention'
+      : session.state === 'working' || session.state === 'waiting' ? 'live' : 'recent',
+    diskBytes: 0,
+    archived: false,
+  }
+}
+
+async function resolveSession(sessionId: string): Promise<SessionRow | null> {
+  const recorded = await store.session(sessionId)
+  if (recorded) return recorded
+  const controlled = controller.snapshot().sessions.find((session) => session.id === sessionId)
+  if (controlled) return sessionState.apply(controlRow(controlled))
+  const live = liveMonitor.snapshot().agents.find((session) => session.id === sessionId)
+  return live ? sessionState.apply(liveRow(live)) : null
+}
+
 async function workspaceAllowed(cwd: string): Promise<boolean> {
   const resolved = path.resolve(cwd)
   if (resolved === process.cwd()) return true
   const dashboard = await store.dashboard()
   if (dashboard.sessions.some((session) => path.resolve(session.cwd) === resolved)) return true
+  if (liveMonitor.snapshot().agents.some((session) => path.resolve(session.cwd) === resolved)) return true
   return controller.snapshot().sessions.some((session) => path.resolve(session.cwd) === resolved)
 }
 
@@ -149,6 +228,77 @@ app.get('/api/sessions/:id', async (request, response, next) => {
     response.json(session)
   } catch (error) {
     next(error)
+  }
+})
+
+app.get('/api/sessions/:id/workbench', async (request, response, next) => {
+  try {
+    const session = await resolveSession(request.params.id)
+    if (!session) {
+      response.status(404).json({ error: 'Session not found' })
+      return
+    }
+    const live = liveMonitor.snapshot().agents.find((item) => item.id === session.id) || null
+    const control = controller.snapshot().sessions.find((item) => item.id === session.id) || null
+    const permissions = controller.snapshot().permissions.filter((item) => item.sessionId === session.id)
+    const transcript = mergeSessionFeed(
+      await sessionReader.transcript(session),
+      live?.feed || [],
+      control?.feed || [],
+    )
+    response.json({
+      generatedAt: new Date().toISOString(),
+      session,
+      transcript,
+      live,
+      control,
+      permissions,
+      managed: Boolean(control),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.patch('/api/sessions/:id', async (request, response) => {
+  const session = await resolveSession(request.params.id)
+  if (!session) {
+    response.status(404).json({ error: 'Session not found' })
+    return
+  }
+  const title = request.body?.title
+  const archived = request.body?.archived
+  if (title !== undefined && typeof title !== 'string') {
+    response.status(400).json({ error: 'Session title must be a string.' })
+    return
+  }
+  if (archived !== undefined && typeof archived !== 'boolean') {
+    response.status(400).json({ error: 'Archived state must be a boolean.' })
+    return
+  }
+  try {
+    const annotation = await sessionState.annotate(session.id, { title, archived })
+    if (annotation.title) controller.renameSession(session.id, annotation.title)
+    store.invalidate()
+    const updated = await resolveSession(session.id)
+    const dashboard = await store.dashboard(true)
+    broadcast('dashboard', dashboard)
+    response.json(updated)
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Unable to update session.' })
+  }
+})
+
+app.post('/api/sessions/:id/cancel', async (request, response) => {
+  if (!controller.hasSession(request.params.id)) {
+    response.status(409).json({ error: 'Attach this session by sending a prompt before cancelling it.' })
+    return
+  }
+  try {
+    await controller.cancelSession(request.params.id)
+    response.status(202).json({ cancelled: true })
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Unable to cancel session.' })
   }
 })
 

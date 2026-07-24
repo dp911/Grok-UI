@@ -279,6 +279,7 @@ function fallbackSession(record: ActiveSessionRecord): SessionRow {
     contextUsage: 0,
     status: 'live',
     diskBytes: 0,
+    archived: false,
   }
 }
 

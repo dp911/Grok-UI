@@ -29,6 +29,7 @@ interface ControlViewProps {
   live: LiveSnapshot | null
   control: ControlSnapshot | null
   onRefresh: () => Promise<void>
+  onOpenSession: (sessionId: string) => void
 }
 
 function compact(value: number): string {
@@ -42,7 +43,7 @@ function uniqueWorkspaces(data: DashboardPayload, live: LiveSnapshot | null): st
   ].filter(Boolean))]
 }
 
-export function ControlView({ data, live, control, onRefresh }: ControlViewProps) {
+export function ControlView({ data, live, control, onRefresh, onOpenSession }: ControlViewProps) {
   const workspaces = useMemo(() => uniqueWorkspaces(data, live), [data, live])
   const resumable = useMemo(() => {
     const seen = new Set<string>()
@@ -52,7 +53,7 @@ export function ControlView({ data, live, control, onRefresh }: ControlViewProps
         title: session.title,
         cwd: session.cwd,
       })),
-      ...data.sessions,
+      ...data.sessions.filter((session) => !session.archived),
     ].filter((session) => {
       if (seen.has(session.id)) return false
       seen.add(session.id)
@@ -326,6 +327,9 @@ export function ControlView({ data, live, control, onRefresh }: ControlViewProps
                   )}
                   <button className="open-lane" onClick={() => setSelectedLane(session.id)}>
                     Open stream
+                  </button>
+                  <button className="open-lane" onClick={() => onOpenSession(session.id)}>
+                    Workbench
                   </button>
                 </div>
               </article>

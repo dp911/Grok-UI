@@ -2,6 +2,8 @@ import type {
   ControlSession,
   ControlSnapshot,
   DashboardPayload,
+  SessionRow,
+  SessionWorkbenchData,
   LiveSnapshot,
   WorkspaceDiff,
   WorkspaceSnapshot,
@@ -91,4 +93,30 @@ export async function getWorkspaceDiff(cwd: string, file: string): Promise<Works
     await fetch(`/api/workspace/diff?cwd=${encodeURIComponent(cwd)}&file=${encodeURIComponent(file)}`),
     'Diff request failed',
   )
+}
+
+export async function getSessionWorkbench(sessionId: string): Promise<SessionWorkbenchData> {
+  return json(
+    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/workbench`, {
+      headers: { Accept: 'application/json' },
+    }),
+    'Session workbench request failed',
+  )
+}
+
+export async function updateSession(
+  sessionId: string,
+  patch: { title?: string; archived?: boolean },
+): Promise<SessionRow> {
+  return json(await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }), 'Unable to update session')
+}
+
+export async function cancelWorkbenchSession(sessionId: string): Promise<void> {
+  await json(await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+    method: 'POST',
+  }), 'Unable to cancel session')
 }

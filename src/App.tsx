@@ -43,6 +43,7 @@ import type {
 } from './types'
 import { ChangesView } from './views/ChangesView'
 import { ControlView } from './views/ControlView'
+import { SessionWorkbench } from './views/SessionWorkbench'
 
 interface NavItem {
   id: ViewId
@@ -77,12 +78,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** power).toFixed(power > 1 ? 1 : 0)} ${units[power]}`
 }
 
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3_600) return `${Math.round(seconds / 60)}m`
-  return `${(seconds / 3_600).toFixed(1)}h`
-}
-
 function timeAgo(input: string): string {
   const delta = Math.max(0, Date.now() - new Date(input).getTime())
   if (delta < 60_000) return 'just now'
@@ -111,7 +106,7 @@ function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
-  const [selectedSession, setSelectedSession] = useState<SessionRow | null>(null)
+  const [selectedSession, setSelectedSession] = useState<{ id: string; fallback: SessionRow | null } | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const lastAttentionRef = useRef(0)
@@ -220,6 +215,12 @@ function App() {
     setControl(await getControlSnapshot())
   }, [])
 
+  const openSession = useCallback((session: SessionRow | string) => {
+    setSelectedSession(typeof session === 'string'
+      ? { id: session, fallback: data?.sessions.find((item) => item.id === session) || null }
+      : { id: session.id, fallback: session })
+  }, [data?.sessions])
+
   if (authenticated === null) return <BootScreen label="SECURING LOCAL LINK" />
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} />
 
@@ -252,13 +253,19 @@ function App() {
           <ErrorState message={error} onRetry={() => void load(true)} />
         ) : (
           <div className="view-wrap" key={view}>
-            {view === 'live' && <LiveView live={live} data={data} onOpenSession={setSelectedSession} />}
+            {view === 'live' && <LiveView live={live} data={data} onOpenSession={openSession} />}
             {view === 'control' && (
-              <ControlView data={data} live={live} control={control} onRefresh={refreshControl} />
+              <ControlView
+                data={data}
+                live={live}
+                control={control}
+                onRefresh={refreshControl}
+                onOpenSession={openSession}
+              />
             )}
             {view === 'changes' && <ChangesView data={data} live={live} />}
             {view === 'overview' && (
-              <Overview data={data} live={live} onOpenSession={setSelectedSession} onNavigate={setActiveView} />
+              <Overview data={data} live={live} onOpenSession={openSession} onNavigate={setActiveView} />
             )}
             {view === 'sessions' && (
               <SessionsView
@@ -266,7 +273,7 @@ function App() {
                 live={live}
                 query={query}
                 onQuery={setQuery}
-                onOpenSession={setSelectedSession}
+                onOpenSession={openSession}
               />
             )}
             {view === 'activity' && <ActivityView data={data} />}
@@ -277,7 +284,16 @@ function App() {
       </main>
 
       <MobileNav active={view} onNavigate={setActiveView} />
-      {selectedSession && <SessionDrawer session={selectedSession} onClose={() => setSelectedSession(null)} />}
+      {selectedSession && (
+        <SessionWorkbench
+          sessionId={selectedSession.id}
+          fallback={data?.sessions.find((item) => item.id === selectedSession.id) || selectedSession.fallback}
+          live={live}
+          control={control}
+          onClose={() => setSelectedSession(null)}
+          onUpdated={() => load(true)}
+        />
+      )}
       {paletteOpen && (
         <CommandPalette
           data={data}
@@ -287,7 +303,7 @@ function App() {
             setPaletteOpen(false)
           }}
           onSession={(session) => {
-            setSelectedSession(session)
+            openSession(session)
             setPaletteOpen(false)
           }}
         />
@@ -376,7 +392,7 @@ function Sidebar({
           </div>
         </div>
         <div className="sidebar-foot">
-          <span>UI / 0.2.0</span>
+          <span>UI / 0.3.0</span>
           <span>ACP CONTROL</span>
         </div>
       </aside>
@@ -437,7 +453,7 @@ function LiveView({
 }: {
   live: LiveSnapshot | null
   data: DashboardPayload
-  onOpenSession: (session: SessionRow) => void
+  onOpenSession: (session: SessionRow | string) => void
 }) {
   const [selectedId, setSelectedId] = useState(live?.agents[0]?.id || '')
   const feedRef = useRef<HTMLDivElement>(null)
@@ -543,11 +559,9 @@ function LiveView({
               </div>
               <div className="runtime-actions">
                 <AgentStatePill agent={selected} />
-                {selectedSession && (
-                  <button className="text-button" onClick={() => onOpenSession(selectedSession)}>
-                    Session details <ArrowRight size={14} />
-                  </button>
-                )}
+                <button className="text-button" onClick={() => onOpenSession(selectedSession || selected.id)}>
+                  Open workbench <ArrowRight size={14} />
+                </button>
               </div>
             </header>
 
@@ -676,7 +690,7 @@ function Overview({
   onOpenSession: (session: SessionRow) => void
   onNavigate: (view: ViewId) => void
 }) {
-  const recent = data.sessions.slice(0, 6)
+  const recent = data.sessions.filter((session) => !session.archived).slice(0, 6)
   return (
     <>
       <PageIntro
@@ -994,14 +1008,17 @@ function SessionsView({
   onQuery: (value: string) => void
   onOpenSession: (session: SessionRow) => void
 }) {
+  const [archiveScope, setArchiveScope] = useState<'active' | 'archived'>('active')
   const sessions = useMemo(() => {
     const normalized = query.trim().toLowerCase()
-    if (!normalized) return data.sessions
-    return data.sessions.filter((session) =>
-      [session.title, session.summary, session.cwd, session.model, session.agent]
-        .some((value) => value.toLowerCase().includes(normalized)),
-    )
-  }, [data.sessions, query])
+    return data.sessions.filter((session) => {
+      if (archiveScope === 'active' ? session.archived : !session.archived) return false
+      if (!normalized) return true
+      return [session.title, session.summary, session.cwd, session.model, session.agent]
+        .some((value) => value.toLowerCase().includes(normalized))
+    })
+  }, [archiveScope, data.sessions, query])
+  const archivedCount = data.sessions.filter((session) => session.archived).length
 
   return (
     <>
@@ -1013,6 +1030,14 @@ function SessionsView({
       />
       <div className="view-toolbar">
         <SearchField value={query} onChange={onQuery} placeholder="Filter title, workspace, model, agent…" />
+        <div className="archive-switch" role="group" aria-label="Session archive filter">
+          <button className={archiveScope === 'active' ? 'is-active' : ''} onClick={() => setArchiveScope('active')}>
+            Active <span>{data.sessions.length - archivedCount}</span>
+          </button>
+          <button className={archiveScope === 'archived' ? 'is-active' : ''} onClick={() => setArchiveScope('archived')}>
+            Archived <span>{archivedCount}</span>
+          </button>
+        </div>
         <div className="toolbar-stat"><strong>{sessions.length}</strong><span>of {data.sessions.length} sessions</span></div>
       </div>
       <section className="data-table-wrap">
@@ -1033,7 +1058,13 @@ function SessionsView({
               <span><ChevronRight size={16} /></span>
             </button>
           )
-        }) : <EmptyBlock icon={Search} title="No matching sessions" copy="Try a broader title, workspace, model, or agent name." />}
+        }) : <EmptyBlock
+          icon={archiveScope === 'archived' ? Archive : Search}
+          title={archiveScope === 'archived' ? 'No archived sessions' : 'No matching sessions'}
+          copy={archiveScope === 'archived'
+            ? 'Archive a session from its workbench and it will appear here.'
+            : 'Try a broader title, workspace, model, or agent name.'}
+        />}
       </section>
     </>
   )
@@ -1251,53 +1282,6 @@ function SearchField({ value, onChange, placeholder }: { value: string; onChange
   )
 }
 
-function SessionDrawer({ session, onClose }: { session: SessionRow; onClose: () => void }) {
-  return (
-    <div className="drawer-layer" role="dialog" aria-modal="true" aria-label={`Session: ${session.title}`}>
-      <button className="drawer-scrim" onClick={onClose} aria-label="Close session details" />
-      <aside className="session-drawer">
-        <header className="drawer-head">
-          <div><span>SESSION / {session.id.slice(0, 8)}</span><StatusGlyph status={session.status} /></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button>
-        </header>
-        <div className="drawer-content">
-          <div className="kicker">{session.workspace}</div>
-          <h2>{session.title}</h2>
-          <p className="drawer-summary">{session.summary || 'No generated summary is available for this session.'}</p>
-          <div className="drawer-path"><FolderGit2 size={16} /><span>{session.cwd}</span></div>
-          <div className="drawer-stat-grid">
-            <DrawerStat label="Turns" value={formatNumber(session.turns)} />
-            <DrawerStat label="Tool calls" value={formatNumber(session.toolCalls)} />
-            <DrawerStat label="Files touched" value={formatNumber(session.filesTouched)} />
-            <DrawerStat label="Duration" value={formatDuration(session.durationSeconds)} />
-            <DrawerStat label="Lines added" value={`+${formatNumber(session.linesAdded)}`} />
-            <DrawerStat label="Lines removed" value={`−${formatNumber(session.linesRemoved)}`} />
-          </div>
-          <div className="context-block">
-            <div><span>Context window</span><strong>{Math.round(session.contextUsage * 100)}%</strong></div>
-            <div className="context-track"><span style={{ width: `${session.contextUsage * 100}%` }} /></div>
-          </div>
-          <dl className="session-spec">
-            <div><dt>Model</dt><dd>{session.model}</dd></div>
-            <div><dt>Agent profile</dt><dd>{session.agent}</dd></div>
-            <div><dt>Reasoning</dt><dd>{session.reasoningEffort}</dd></div>
-            <div><dt>Sandbox</dt><dd>{session.sandboxProfile}</dd></div>
-            <div><dt>Created</dt><dd>{new Date(session.createdAt).toLocaleString()}</dd></div>
-            <div><dt>Updated</dt><dd>{new Date(session.updatedAt).toLocaleString()}</dd></div>
-            <div><dt>Disk footprint</dt><dd>{formatBytes(session.diskBytes)}</dd></div>
-            <div><dt>Errors</dt><dd className={session.errors ? 'warning-text' : ''}>{session.errors}</dd></div>
-          </dl>
-          <div className="read-only-note"><ShieldCheck size={17} /><span><strong>Read-only view</strong>Conversation text and terminal output are deliberately excluded from this dashboard surface.</span></div>
-        </div>
-      </aside>
-    </div>
-  )
-}
-
-function DrawerStat({ label, value }: { label: string; value: string }) {
-  return <div><span>{label}</span><strong>{value}</strong></div>
-}
-
 function CommandPalette({
   data,
   onClose,
@@ -1313,7 +1297,8 @@ function CommandPalette({
   const normalized = value.toLowerCase()
   const navResults = NAV_ITEMS.filter((item) => item.label.toLowerCase().includes(normalized))
   const sessionResults = (data?.sessions || []).filter((session) =>
-    [session.title, session.workspace, session.model].some((item) => item.toLowerCase().includes(normalized)),
+    !session.archived
+    && [session.title, session.workspace, session.model].some((item) => item.toLowerCase().includes(normalized)),
   ).slice(0, 5)
 
   return (

@@ -24,6 +24,7 @@ export interface SessionRow {
   contextUsage: number
   status: SessionStatus
   diskBytes: number
+  archived: boolean
 }
 
 export interface ActivityDay {
@@ -201,4 +202,14 @@ export interface WorkspaceDiff {
   path: string
   diff: string
   truncated: boolean
+}
+
+export interface SessionWorkbenchData {
+  generatedAt: string
+  session: SessionRow
+  transcript: LiveFeedItem[]
+  live: LiveAgent | null
+  control: ControlSession | null
+  permissions: ControlPermission[]
+  managed: boolean
 }

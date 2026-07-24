@@ -14,6 +14,7 @@ import type {
   ControlSnapshot,
   LiveFeedItem,
 } from './types.js'
+import { SessionStateStore } from './session-state.js'
 
 interface NewControlSession {
   cwd: string
@@ -134,6 +135,21 @@ export class GrokController extends EventEmitter {
   private loadedSessions = new Set<string>()
   private permissions = new Map<string, PendingPermission>()
   private stderrTail: string[] = []
+  private persistTimer: NodeJS.Timeout | null = null
+
+  constructor(private readonly sessionState?: SessionStateStore) {
+    super()
+  }
+
+  async restore(): Promise<void> {
+    if (!this.sessionState) return
+    await this.sessionState.load()
+    this.sessions = new Map(this.sessionState.managedSessions().map((session) => [
+      session.id,
+      session,
+    ]))
+    this.emitSnapshot()
+  }
 
   snapshot(): ControlSnapshot {
     return {
@@ -160,6 +176,9 @@ export class GrokController extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    if (this.persistTimer) clearTimeout(this.persistTimer)
+    this.persistTimer = null
+    await this.persist()
     this.permissions.forEach((permission) => {
       permission.resolve({ outcome: { outcome: 'cancelled' } })
     })
@@ -169,6 +188,22 @@ export class GrokController extends EventEmitter {
     this.connected = false
     this.process?.kill('SIGTERM')
     this.process = null
+    this.emitSnapshot()
+    await this.persist()
+  }
+
+  hasSession(sessionId: string): boolean {
+    return this.sessions.has(sessionId)
+  }
+
+  renameSession(sessionId: string, title: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    this.sessions.set(sessionId, {
+      ...session,
+      title,
+      updatedAt: now(),
+    })
     this.emitSnapshot()
   }
 
@@ -308,7 +343,7 @@ export class GrokController extends EventEmitter {
         clientInfo: {
           name: 'grok-ui',
           title: 'Grok UI',
-          version: '0.2.0',
+          version: '0.3.0',
         },
       })
       this.agentName = initialized.agentInfo?.title || initialized.agentInfo?.name || 'Grok'
@@ -460,6 +495,21 @@ export class GrokController extends EventEmitter {
 
   private emitSnapshot() {
     this.emit('control', this.snapshot())
+    if (!this.sessionState) return
+    if (this.persistTimer) clearTimeout(this.persistTimer)
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      void this.persist()
+    }, 140)
+  }
+
+  private async persist(): Promise<void> {
+    if (!this.sessionState) return
+    try {
+      await this.sessionState.saveManagedSessions([...this.sessions.values()])
+    } catch (persistError) {
+      this.error = `Unable to persist managed sessions: ${safeError(persistError)}`
+    }
   }
 
   private validatePrompt(prompt: string) {

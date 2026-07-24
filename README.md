@@ -11,12 +11,14 @@ Inspired by [Hermes HUD Web UI](https://github.com/joeynyc/hermes-hudui), but bu
 - Live active-agent roster from Grok’s process registry
 - Real-time reasoning, response, plan, tool, phase, and usage events
 - Native ACP command deck for new and existing sessions
+- Full Session Workbench with live conversation, reasoning, tools, permissions, and follow-ups
 - Concurrent, independently cancellable Grok sessions
 - Real permission queue with Grok-provided approval options
 - Git branch, dirty-state, file-change, and bounded diff inspection
 - Context, token, and cost telemetry when Grok reports it
 - Desktop notifications when a session needs input
-- Session archive, activity history, models, tools, skills, and memory inventory
+- Durable managed sessions plus rename, archive, restore, and per-session change inspection
+- Activity history, models, tools, skills, and memory inventory
 - Loopback-only default with mandatory token authentication for remote binding
 - Responsive desktop and mobile interface with keyboard navigation
 
@@ -85,6 +87,7 @@ ssh -L 4310:127.0.0.1:4310 your-machine
 | `GROK_HOME` | `~/.grok` | Grok state directory |
 | `GROK_BIN` | `grok` | Grok executable used by the ACP controller |
 | `GROK_UI_TOKEN` | empty | Required when `HOST` is not loopback |
+| `GROK_UI_STATE_DIR` | `~/.grok-ui` | Private Grok UI annotations and durable managed-session state |
 
 ## How control works
 
@@ -107,6 +110,12 @@ Express supervisor
 ```
 
 Permission decisions are never guessed or auto-approved. Grok’s own permission options are rendered in the approval queue and the user’s selected option is returned over the same ACP request.
+
+## Session Workbench
+
+Open any recorded session, active Grok CLI process, or Grok UI-managed lane to enter the workbench. It combines the bounded on-disk session transcript with live filesystem and ACP updates, so messages, reasoning, tool calls, status, and permission decisions remain current without polling the full archive.
+
+Sending a follow-up attaches a recorded CLI session to Grok UI’s ACP supervisor with `session/load`. Rename and archive actions are Grok UI overlays stored under `~/.grok-ui`; they never rewrite Grok’s own session files. Managed lanes, bounded event history, token totals, and costs are persisted locally and restored as idle after a Grok UI server restart.
 
 ## Privacy and security
 
@@ -141,11 +150,14 @@ server/
   grok-controller.ts      ACP lifecycle, prompts, approvals, cancellation
   live-monitor.ts         event-driven Grok runtime projection
   grok-store.ts           historical metadata aggregation
+  session-reader.ts       bounded conversation and tool timeline projection
+  session-state.ts        durable managed lanes and local annotations
   workspace-inspector.ts  bounded Git status and diff inspection
   security.ts             local/remote access gate
 src/
   views/ControlView.tsx   command deck and approval queue
   views/ChangesView.tsx   repository change workbench
+  views/SessionWorkbench.tsx  live session operations
   App.tsx                 live and historical dashboard shell
 ```
 

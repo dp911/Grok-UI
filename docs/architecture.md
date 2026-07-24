@@ -6,7 +6,7 @@ Grok UI is a single-user local developer tool with three data planes.
 
 `LiveMonitor` watches `active_sessions.json` plus bounded tails of active `events.jsonl` and `updates.jsonl` files. Filesystem events are debounced and projected into a small `LiveSnapshot`, then delivered through server-sent events.
 
-Historical views use `summary.json` and `signals.json`. Memory bodies, system prompts, raw terminal history, and authentication files are not read.
+Historical aggregate views use `summary.json` and `signals.json`. The Session Workbench reads bounded tails of `updates.jsonl` and, for older sessions without structured updates, `chat_history.jsonl`. Memory bodies, system prompts, raw terminal history, and authentication files are not read.
 
 ## Control plane
 
@@ -23,6 +23,12 @@ The connection supports:
 - `session/request_permission`
 
 Each permission request stays pending as a server-side promise until an authenticated user selects one of Grok’s options or cancels the turn. The browser cannot manufacture an option that Grok did not advertise.
+
+## Durable UI state
+
+`SessionStateStore` atomically persists Grok UI-owned annotations and managed ACP lanes to `~/.grok-ui/state.json` with user-only file permissions. It never mutates Grok’s session directories. Rename and archive are therefore reversible UI overlays.
+
+Managed lanes retain a bounded event tail and usage totals. If the server exits during a turn, the lane restores as idle with a `server_restarted` stop reason; the user can explicitly resume it through `session/load` and `session/prompt`.
 
 ## Workspace plane
 

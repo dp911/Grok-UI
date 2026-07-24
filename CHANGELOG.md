@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-07-24
+
+- Added the full-screen Session Workbench for CLI and dashboard-created sessions.
+- Added live conversation, reasoning, tool, plan, permission, and status timelines.
+- Added in-context follow-up prompting and ACP attachment for recorded CLI sessions.
+- Added per-session Git status and bounded diff inspection.
+- Added safe local rename, archive, restore, and managed-turn cancellation actions.
+- Added durable managed-session recovery across Grok UI server restarts.
+- Added active and archived session filters.
+
 ## 0.2.0 — 2026-07-24
 
 - Added native ACP session creation, resume, prompt, and cancellation.
