@@ -392,7 +392,7 @@ function Sidebar({
           </div>
         </div>
         <div className="sidebar-foot">
-          <span>UI / 0.3.0</span>
+          <span>UI / 0.3.1</span>
           <span>ACP CONTROL</span>
         </div>
       </aside>

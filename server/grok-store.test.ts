@@ -80,8 +80,9 @@ describe('GrokStore', () => {
   })
 
   it('projects an active Grok process and structured updates into the live feed', async () => {
-    const grokHome = await fs.mkdtemp(path.join(os.tmpdir(), 'grok-hud-live-test-'))
-    cleanup.push(grokHome)
+    const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'grok-hud-live-test-'))
+    cleanup.push(testRoot)
+    const grokHome = path.join(testRoot, '.grok')
     const sessionId = '019f-live-session'
     const sessionDir = path.join(grokHome, 'sessions', '%2Ftmp%2Flive', sessionId)
     await fs.mkdir(sessionDir, { recursive: true })

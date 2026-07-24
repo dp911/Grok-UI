@@ -349,7 +349,7 @@ export class GrokController extends EventEmitter {
         clientInfo: {
           name: 'grok-ui',
           title: 'Grok UI',
-          version: '0.3.0',
+          version: '0.3.1',
         },
       })
       this.agentName = initialized.agentInfo?.title || initialized.agentInfo?.name || 'Grok'

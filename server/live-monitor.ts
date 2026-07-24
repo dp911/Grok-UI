@@ -311,7 +311,6 @@ export class LiveMonitor extends EventEmitter {
     ], {
       ignoreInitial: true,
       ignored: [
-        /(^|[/\\])\../,
         /[/\\]terminal[/\\]/,
         /[/\\]rewind_points/,
         /[/\\]chat_history/,

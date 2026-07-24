@@ -1,6 +1,6 @@
 {
   "name": "grok-ui",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A local-first command center and live dashboard for Grok Build.",
   "private": true,
   "license": "MIT",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 — 2026-07-24
+
+- Fixed live detection for standalone Grok CLI sessions under `~/.grok`.
+- Added regression coverage for Grok homes located inside hidden directories.
+
 ## 0.3.0 — 2026-07-24
 
 - Added the full-screen Session Workbench for CLI and dashboard-created sessions.
