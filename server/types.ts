@@ -197,6 +197,11 @@ export interface WorkspaceSnapshot {
   error: string
 }
 
+export interface WorkspaceChangeEvent {
+  root: string
+  generatedAt: string
+}
+
 export interface WorkspaceDiff {
   cwd: string
   path: string

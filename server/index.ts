@@ -32,6 +32,7 @@ function broadcast(event: string, payload: unknown) {
 liveMonitor.on('live', (payload) => broadcast('live', payload))
 liveMonitor.on('dashboard', (payload) => broadcast('dashboard', payload))
 controller.on('control', (payload) => broadcast('control', payload))
+workspaceInspector.on('change', (payload) => broadcast('workspace', payload))
 
 app.disable('x-powered-by')
 app.use(express.json({ limit: '64kb' }))
@@ -347,7 +348,7 @@ const server = app.listen(port, host, () => {
 
 async function shutdown() {
   server.close()
-  await Promise.all([liveMonitor.stop(), controller.stop()])
+  await Promise.all([liveMonitor.stop(), controller.stop(), workspaceInspector.close()])
   process.exit(0)
 }
 

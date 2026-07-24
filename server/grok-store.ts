@@ -16,7 +16,6 @@ import { SessionStateStore } from './session-state.js'
 type Json = Record<string, unknown>
 
 const DAY_MS = 86_400_000
-const LIVE_MS = 10 * 60_000
 const RECENT_MS = 24 * 60 * 60_000
 
 function asObject(value: unknown): Json {
@@ -110,10 +109,8 @@ function workspaceName(cwd: string): string {
   return base || cwd
 }
 
-function statusFor(updatedAt: string, errors: number): SessionStatus {
+function historicalStatusFor(updatedAt: string): SessionStatus {
   const age = Date.now() - new Date(updatedAt).getTime()
-  if (age < LIVE_MS && errors > 0) return 'attention'
-  if (age < LIVE_MS) return 'live'
   if (age < RECENT_MS) return 'recent'
   return 'idle'
 }
@@ -184,7 +181,7 @@ async function sessionFromSummary(summaryFile: string): Promise<{
       linesRemoved,
       durationSeconds: asNumber(signals.sessionDurationSeconds),
       contextUsage: Math.max(0, Math.min(1, rawContextUsage > 1 ? rawContextUsage / 100 : rawContextUsage)),
-      status: statusFor(updatedAt, errors),
+      status: historicalStatusFor(updatedAt),
       diskBytes: bytes,
       archived: false,
     },
@@ -305,6 +302,7 @@ function buildActivity(sessions: SessionRow[], days = 14): ActivityDay[] {
 export class GrokStore {
   readonly grokHome: string
   private cache: { at: number; payload: DashboardPayload } | null = null
+  private liveStatuses = new Map<string, Extract<SessionStatus, 'live' | 'attention'>>()
 
   constructor(
     grokHome = process.env.GROK_HOME || path.join(os.homedir(), '.grok'),
@@ -315,6 +313,15 @@ export class GrokStore {
 
   invalidate(): void {
     this.cache = null
+  }
+
+  setLiveStatuses(statuses: Map<string, Extract<SessionStatus, 'live' | 'attention'>>): boolean {
+    const unchanged = statuses.size === this.liveStatuses.size
+      && [...statuses].every(([id, status]) => this.liveStatuses.get(id) === status)
+    if (unchanged) return false
+    this.liveStatuses = new Map(statuses)
+    this.invalidate()
+    return true
   }
 
   async dashboard(force = false): Promise<DashboardPayload> {
@@ -329,8 +336,11 @@ export class GrokStore {
       directorySize(this.grokHome, 4),
       readJson(path.join(this.grokHome, 'version.json')),
     ])
-    const sessions = sessionData.map((item) =>
-      this.sessionState?.apply(item.row) || item.row)
+    const sessions = sessionData.map((item) => {
+      const row = this.sessionState?.apply(item.row) || item.row
+      const liveStatus = this.liveStatuses.get(row.id)
+      return liveStatus ? { ...row, status: liveStatus } : row
+    })
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     const models = new Map<string, number>()
     const tools = new Map<string, number>()

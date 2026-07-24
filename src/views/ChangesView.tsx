@@ -12,6 +12,7 @@ import { getWorkspaceDiff, getWorkspaceSnapshot } from '../api'
 import type {
   DashboardPayload,
   LiveSnapshot,
+  WorkspaceChangeEvent,
   WorkspaceDiff,
   WorkspaceSnapshot,
 } from '../types'
@@ -19,9 +20,11 @@ import type {
 interface ChangesViewProps {
   data: DashboardPayload
   live: LiveSnapshot | null
+  connected: boolean
+  workspaceChange: WorkspaceChangeEvent | null
 }
 
-export function ChangesView({ data, live }: ChangesViewProps) {
+export function ChangesView({ data, live, connected, workspaceChange }: ChangesViewProps) {
   const workspaces = useMemo(() => [...new Set([
     ...(live?.agents.map((agent) => agent.cwd) || []),
     ...data.sessions.map((session) => session.cwd),
@@ -51,7 +54,9 @@ export function ChangesView({ data, live }: ChangesViewProps) {
         }
       }
       setSnapshot(payload)
-      if (!payload.files.some((file) => file.path === selected)) {
+      if (selected && payload.files.some((file) => file.path === selected)) {
+        setDiff(await getWorkspaceDiff(payload.root, selected))
+      } else if (!payload.files.some((file) => file.path === selected)) {
         setSelected(payload.files[0]?.path || '')
         setDiff(null)
       }
@@ -65,6 +70,10 @@ export function ChangesView({ data, live }: ChangesViewProps) {
   useEffect(() => {
     void loadWorkspace(cwd)
   }, [cwd]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (workspaceChange?.root === snapshot?.root) void loadWorkspace(cwd)
+  }, [workspaceChange]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openDiff = async (file: string) => {
     setSelected(file)
@@ -81,7 +90,7 @@ export function ChangesView({ data, live }: ChangesViewProps) {
   return (
     <>
       <section className="page-intro changes-intro">
-        <div className="page-intro-index">03 / 08</div>
+        <div className="page-intro-index">03 / 09</div>
         <div className="page-intro-copy">
           <div className="kicker"><Braces size={14} /> Change surface</div>
           <h1>See the work.<br /><em>Before it lands.</em></h1>
@@ -96,6 +105,10 @@ export function ChangesView({ data, live }: ChangesViewProps) {
             {workspaces.map((workspace) => <option value={workspace} key={workspace}>{workspace}</option>)}
           </select>
         </label>
+        <span className={`workspace-live-state ${connected ? 'is-connected' : ''}`}>
+          <span className={`status-dot ${connected ? 'is-live' : ''}`} />
+          {connected ? 'LIVE WATCH' : 'RECONNECTING'}
+        </span>
         <button className="icon-button" onClick={() => void loadWorkspace()} aria-label="Refresh changes">
           <RefreshCw size={17} className={loading ? 'is-spinning' : ''} />
         </button>

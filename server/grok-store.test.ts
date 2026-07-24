@@ -121,9 +121,11 @@ describe('GrokStore', () => {
       }),
     ].join('\n'))
 
-    const monitor = new LiveMonitor(new GrokStore(grokHome))
+    const store = new GrokStore(grokHome)
+    const monitor = new LiveMonitor(store)
     await monitor.start()
     const snapshot = monitor.snapshot()
+    const liveDashboard = await store.dashboard()
     const pushedLine = `\n${JSON.stringify({
       method: 'session/update',
       timestamp: 1784887264,
@@ -158,6 +160,8 @@ describe('GrokStore', () => {
       turns: 2,
       toolCalls: 3,
     })
+    expect(liveDashboard.stats.liveSessions).toBe(1)
+    expect(liveDashboard.sessions[0].status).toBe('live')
     expect(snapshot.agents[0].feed.map((item) => item.type)).toEqual(['assistant', 'tool'])
     expect(snapshot.agents[0].feed[0].timestamp).not.toBe('1970-01-01T00:00:00.000Z')
     expect(pushedSnapshot.agents[0].feed.at(-1)?.text).toBe('Pushed by watcher')

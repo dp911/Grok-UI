@@ -42,6 +42,7 @@ import type {
   RankedDatum,
   SessionRow,
   ViewId,
+  WorkspaceChangeEvent,
 } from './types'
 import { ChangesView } from './views/ChangesView'
 import { ControlView } from './views/ControlView'
@@ -122,7 +123,7 @@ function timeAgo(input: string): string {
 
 function liveSessionStatus(session: SessionRow, live: LiveSnapshot | null): SessionRow['status'] {
   const agent = live?.agents.find((item) => item.id === session.id)
-  if (!agent) return session.status
+  if (!agent) return session.status === 'live' || session.status === 'attention' ? 'recent' : session.status
   if (agent.state === 'attention') return 'attention'
   if (agent.state === 'working' || agent.state === 'waiting') return 'live'
   return 'recent'
@@ -135,6 +136,7 @@ function App() {
   const [live, setLive] = useState<LiveSnapshot | null>(null)
   const [control, setControl] = useState<ControlSnapshot | null>(null)
   const [streamConnected, setStreamConnected] = useState(false)
+  const [workspaceChange, setWorkspaceChange] = useState<WorkspaceChangeEvent | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -197,6 +199,10 @@ function App() {
     events.addEventListener('control', (event) => {
       setStreamConnected(true)
       setControl(JSON.parse((event as MessageEvent).data) as ControlSnapshot)
+    })
+    events.addEventListener('workspace', (event) => {
+      setStreamConnected(true)
+      setWorkspaceChange(JSON.parse((event as MessageEvent).data) as WorkspaceChangeEvent)
     })
     events.onerror = () => setStreamConnected(false)
     return () => {
@@ -296,7 +302,14 @@ function App() {
           <ErrorState message={error} onRetry={() => void load(true)} />
         ) : (
           <div className="view-wrap" key={view}>
-            {view === 'live' && <LiveView live={live} data={data} onOpenSession={openSession} />}
+            {view === 'live' && (
+              <LiveView
+                live={live}
+                data={data}
+                connected={streamConnected}
+                onOpenSession={openSession}
+              />
+            )}
             {view === 'control' && (
               <ControlView
                 data={data}
@@ -306,9 +319,22 @@ function App() {
                 onOpenSession={openSession}
               />
             )}
-            {view === 'changes' && <ChangesView data={data} live={live} />}
+            {view === 'changes' && (
+              <ChangesView
+                data={data}
+                live={live}
+                connected={streamConnected}
+                workspaceChange={workspaceChange}
+              />
+            )}
             {view === 'overview' && (
-              <Overview data={data} live={live} onOpenSession={openSession} onNavigate={setActiveView} />
+              <Overview
+                data={data}
+                live={live}
+                connected={streamConnected}
+                onOpenSession={openSession}
+                onNavigate={setActiveView}
+              />
             )}
             {view === 'sessions' && (
               <SessionsView
@@ -556,10 +582,12 @@ function TopBar({
 function LiveView({
   live,
   data,
+  connected,
   onOpenSession,
 }: {
   live: LiveSnapshot | null
   data: DashboardPayload
+  connected: boolean
   onOpenSession: (session: SessionRow | string) => void
 }) {
   const [selectedId, setSelectedId] = useState(live?.agents[0]?.id || '')
@@ -611,9 +639,9 @@ function LiveView({
         />
         <LiveSummaryMetric
           label="Transport"
-          value={live?.connected ? 'SSE' : '—'}
+          value={connected ? 'SSE' : '—'}
           detail="filesystem events → browser"
-          tone={live?.connected ? 'lime' : 'coral'}
+          tone={connected ? 'lime' : 'coral'}
         />
       </section>
 
@@ -789,11 +817,13 @@ function LiveFeedRow({ item, index }: { item: LiveFeedItem; index: number }) {
 function Overview({
   data,
   live,
+  connected,
   onOpenSession,
   onNavigate,
 }: {
   data: DashboardPayload
   live: LiveSnapshot | null
+  connected: boolean
   onOpenSession: (session: SessionRow) => void
   onNavigate: (view: ViewId) => void
 }) {
@@ -808,7 +838,7 @@ function Overview({
       />
 
       <section className="overview-grid">
-        <SystemCard data={data} live={live} />
+        <SystemCard data={data} live={live} connected={connected} />
         <MetricCard
           index="A1"
           label="Total turns"
@@ -862,7 +892,7 @@ function Overview({
           className="recent-panel"
           index="04"
           title="Recent sessions"
-          meta={`${data.stats.liveSessions} live now`}
+          meta={`${live?.activeCount || 0} live now`}
           action={<button className="text-button" onClick={() => onNavigate('sessions')}>View archive <ArrowRight size={14} /></button>}
         >
           <SessionList sessions={recent} onOpen={onOpenSession} />
@@ -880,7 +910,15 @@ function Overview({
   )
 }
 
-function SystemCard({ data, live }: { data: DashboardPayload; live: LiveSnapshot | null }) {
+function SystemCard({
+  data,
+  live,
+  connected,
+}: {
+  data: DashboardPayload
+  live: LiveSnapshot | null
+  connected: boolean
+}) {
   const health = data.stats.sessions === 0 ? 0 : Math.max(0, 100 - (data.stats.errors / Math.max(data.stats.turns, 1)) * 100)
   return (
     <article className="system-card panel-cut">
@@ -901,14 +939,17 @@ function SystemCard({ data, live }: { data: DashboardPayload; live: LiveSnapshot
         <div className="orbit orbit-two" />
         <div className="orbit-center">
           <span>{Math.round(health)}</span>
-          <small>SIGNAL</small>
+          <small title="Calculated from recorded errors per turn">DERIVED HEALTH</small>
         </div>
         <div className="orbit-node node-one" />
         <div className="orbit-node node-two" />
         <div className="orbit-node node-three" />
       </div>
       <div className="system-footer">
-        <span><span className="status-dot is-live" /> EVENT STREAM LINKED</span>
+        <span>
+          <span className={`status-dot ${connected ? 'is-live' : ''}`} />
+          {connected ? 'EVENT STREAM LINKED' : 'EVENT STREAM RECONNECTING'}
+        </span>
         <span>{data.grokHome}</span>
       </div>
     </article>

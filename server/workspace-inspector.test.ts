@@ -43,6 +43,7 @@ describe('WorkspaceInspector', () => {
     expect(trackedDiff.diff).toContain('+second')
     expect(newDiff.diff).toContain('+++ b/new.txt')
     expect(newDiff.truncated).toBe(false)
+    await inspector.close()
   })
 
   it('rejects diff paths outside the repository', async () => {
@@ -52,5 +53,28 @@ describe('WorkspaceInspector', () => {
     const inspector = new WorkspaceInspector()
 
     await expect(inspector.diff(directory, '../secret.txt')).rejects.toThrow('outside the repository')
+    await inspector.close()
+  })
+
+  it('emits a debounced live event when the watched worktree changes', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'grok-ui-git-watch-'))
+    cleanup.push(directory)
+    await execFileAsync('git', ['init', directory])
+    await fs.writeFile(path.join(directory, 'tracked.txt'), 'first\n')
+    await execFileAsync('git', ['-C', directory, 'add', 'tracked.txt'])
+    const inspector = new WorkspaceInspector()
+    await inspector.snapshot(directory)
+
+    const changed = new Promise<{ root: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Workspace watcher did not emit')), 5_000)
+      inspector.once('change', (event) => {
+        clearTimeout(timeout)
+        resolve(event)
+      })
+    })
+    await fs.writeFile(path.join(directory, 'tracked.txt'), 'first\nsecond\n')
+
+    await expect(changed).resolves.toMatchObject({ root: await fs.realpath(directory) })
+    await inspector.close()
   })
 })

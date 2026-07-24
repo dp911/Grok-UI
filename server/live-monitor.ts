@@ -287,6 +287,7 @@ export class LiveMonitor extends EventEmitter {
   private watcher: FSWatcher | null = null
   private refreshTimer: NodeJS.Timeout | null = null
   private dashboardTimer: NodeJS.Timeout | null = null
+  private livenessTimer: NodeJS.Timeout | null = null
   private current: LiveSnapshot = {
     generatedAt: new Date().toISOString(),
     connected: false,
@@ -323,11 +324,14 @@ export class LiveMonitor extends EventEmitter {
       }
     })
     await new Promise<void>((resolve) => this.watcher?.once('ready', () => resolve()))
+    this.livenessTimer = setInterval(() => this.scheduleRefresh(), 2_000)
   }
 
   async stop(): Promise<void> {
     if (this.refreshTimer) clearTimeout(this.refreshTimer)
     if (this.dashboardTimer) clearTimeout(this.dashboardTimer)
+    if (this.livenessTimer) clearInterval(this.livenessTimer)
+    this.livenessTimer = null
     await this.watcher?.close()
     this.watcher = null
   }
@@ -415,5 +419,10 @@ export class LiveMonitor extends EventEmitter {
       agents,
     }
     this.emit('live', this.current)
+    const resolvedStatuses = new Map<string, 'live' | 'attention'>(
+      agents.map((agent) => [agent.id, agent.state === 'attention' ? 'attention' : 'live']),
+    )
+    const liveStatusesChanged = this.store.setLiveStatuses(resolvedStatuses)
+    if (liveStatusesChanged) this.emit('dashboard', await this.store.dashboard(true))
   }
 }

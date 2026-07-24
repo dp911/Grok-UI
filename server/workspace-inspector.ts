@@ -1,8 +1,15 @@
 import { execFile } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import type { WorkspaceDiff, WorkspaceFileChange, WorkspaceSnapshot } from './types.js'
+import chokidar, { type FSWatcher } from 'chokidar'
+import type {
+  WorkspaceChangeEvent,
+  WorkspaceDiff,
+  WorkspaceFileChange,
+  WorkspaceSnapshot,
+} from './types.js'
 
 const execFileAsync = promisify(execFile)
 const MAX_DIFF_BYTES = 240 * 1024
@@ -33,7 +40,50 @@ function parseNumstat(value: string, staged: boolean): Map<string, WorkspaceFile
   return files
 }
 
-export class WorkspaceInspector {
+export class WorkspaceInspector extends EventEmitter {
+  private watchers = new Map<string, FSWatcher[]>()
+  private changeTimers = new Map<string, NodeJS.Timeout>()
+
+  private watch(root: string): void {
+    if (this.watchers.has(root)) return
+    const onChange = () => {
+      const existing = this.changeTimers.get(root)
+      if (existing) clearTimeout(existing)
+      this.changeTimers.set(root, setTimeout(() => {
+        this.changeTimers.delete(root)
+        const event: WorkspaceChangeEvent = {
+          root,
+          generatedAt: new Date().toISOString(),
+        }
+        this.emit('change', event)
+      }, 180))
+    }
+    const files = chokidar.watch(root, {
+      ignoreInitial: true,
+      ignored: [
+        /[/\\]\.git[/\\]/,
+        /[/\\]node_modules[/\\]/,
+      ],
+    })
+    const gitState = chokidar.watch([
+      path.join(root, '.git', 'HEAD'),
+      path.join(root, '.git', 'index'),
+      path.join(root, '.git', 'refs'),
+    ], {
+      ignoreInitial: true,
+    })
+    files.on('all', onChange)
+    gitState.on('all', onChange)
+    this.watchers.set(root, [files, gitState])
+  }
+
+  async close(): Promise<void> {
+    this.changeTimers.forEach((timer) => clearTimeout(timer))
+    this.changeTimers.clear()
+    await Promise.all([...this.watchers.values()].flat().map((watcher) => watcher.close()))
+    this.watchers.clear()
+  }
+
   async snapshot(inputCwd: string): Promise<WorkspaceSnapshot> {
     const cwd = path.resolve(inputCwd)
     try {
@@ -49,6 +99,7 @@ export class WorkspaceInspector {
         ? await git(root, ['rev-list', '--left-right', '--count', `HEAD...${upstream}`]).catch(() => '0\t0')
         : '0\t0'
       const [ahead, behind] = divergence.split(/\s+/).map((value) => Number(value) || 0)
+      this.watch(root)
       const unstaged = parseNumstat(unstagedRaw, false)
       const staged = parseNumstat(stagedRaw, true)
       const files = new Map<string, WorkspaceFileChange>()
