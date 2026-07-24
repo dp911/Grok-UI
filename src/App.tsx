@@ -365,6 +365,15 @@ function AmbientGrid() {
   )
 }
 
+function BrandLogo() {
+  return (
+    <span className="brand-logo-shell" aria-hidden="true">
+      <img className="brand-logo" src="/brand/grok-mark.png" alt="" />
+      <i />
+    </span>
+  )
+}
+
 function ThemesView({
   active,
   onSelect,
@@ -446,10 +455,7 @@ function Sidebar({
       />
       <aside className={`sidebar ${open ? 'is-open' : ''}`}>
         <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-          </div>
+          <BrandLogo />
           <div>
             <div className="brand-word">GROK</div>
             <div className="brand-sub">Local command</div>
@@ -493,7 +499,7 @@ function Sidebar({
           </div>
         </div>
         <div className="sidebar-foot">
-          <span>UI / 0.4.0</span>
+          <span>UI / 0.4.1</span>
           <span>ACP CONTROL</span>
         </div>
       </aside>
@@ -1462,7 +1468,7 @@ function BootScreen({ label }: { label: string }) {
     <main className="access-screen">
       <AmbientGrid />
       <div className="access-card boot-card">
-        <div className="brand-mark" aria-hidden="true"><span /><span /></div>
+        <BrandLogo />
         <div className="loading-bars"><i /><i /><i /><i /></div>
         <strong>{label}</strong>
       </div>
@@ -1491,7 +1497,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         }}
       >
         <div className="brand-lockup access-brand">
-          <div className="brand-mark" aria-hidden="true"><span /><span /></div>
+          <BrandLogo />
           <div><div className="brand-word">GROK</div><div className="brand-sub">Secure command</div></div>
         </div>
         <div className="kicker"><ShieldCheck size={14} /> Remote access gate</div>

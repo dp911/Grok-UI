@@ -124,13 +124,15 @@ html[data-theme='event-horizon'] {
   background: rgba(3, 6, 12, .76);
 }
 
-.app-shell[data-theme='event-horizon'] .brand-mark {
-  border-color: rgba(244, 246, 250, .76);
-  box-shadow: 0 0 30px rgba(255, 55, 43, .12);
+.app-shell[data-theme='event-horizon'] .brand-logo-shell,
+html[data-theme='event-horizon'] .access-screen .brand-logo-shell {
+  --brand-glow: rgba(255, 73, 61, .62);
+  --brand-signal: #ff493d;
 }
 
-.app-shell[data-theme='event-horizon'] .brand-mark span {
-  box-shadow: 0 0 14px rgba(255, 55, 43, .78);
+.app-shell[data-theme='event-horizon'] .brand-logo,
+html[data-theme='event-horizon'] .access-screen .brand-logo {
+  filter: drop-shadow(0 0 9px rgba(255, 73, 61, .42));
 }
 
 .app-shell[data-theme='event-horizon'] .ambient-orb {
@@ -224,22 +226,51 @@ html[data-theme='event-horizon'] {
   padding: 0 7px 26px;
 }
 
-.brand-mark {
+.brand-logo-shell {
+  --brand-glow: rgba(217, 255, 67, .48);
+  --brand-signal: var(--lime);
   position: relative;
-  width: 31px;
-  height: 31px;
-  border: 1px solid var(--paper);
-  transform: rotate(45deg);
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
 }
 
-.brand-mark span {
+.brand-logo-shell::before {
+  content: '';
   position: absolute;
-  inset: 6px 14px;
-  background: var(--lime);
+  inset: 5px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--brand-glow), transparent 68%);
+  filter: blur(8px);
 }
 
-.brand-mark span:last-child {
-  transform: rotate(90deg);
+.brand-logo-shell::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  right: 1px;
+  bottom: 4px;
+  border-radius: 50%;
+  background: var(--brand-signal);
+  box-shadow: 0 0 9px var(--brand-signal);
+}
+
+.brand-logo {
+  width: 44px;
+  height: 44px;
+  display: block;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px var(--brand-glow));
+  transition: filter .3s ease, transform .3s ease;
+}
+
+.brand-lockup:hover .brand-logo {
+  transform: rotate(-3deg) scale(1.04);
 }
 
 .brand-word,
@@ -4085,7 +4116,15 @@ kbd {
   gap: 22px;
 }
 
-.boot-card .brand-mark { width: 44px; height: 44px; }
+.boot-card .brand-logo-shell {
+  width: 58px;
+  height: 58px;
+}
+
+.boot-card .brand-logo {
+  width: 60px;
+  height: 60px;
+}
 
 .boot-card strong {
   color: var(--muted);

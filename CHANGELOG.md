@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 — 2026-07-24
+
+- Replaced the placeholder sidebar glyph with a clean Grok symbol derived from the supplied artwork.
+- Added theme-aware logo glow treatments across the sidebar and access screens.
+
 ## 0.4.0 — 2026-07-24
 
 - Added a persistent Themes section with live, one-click appearance switching.
