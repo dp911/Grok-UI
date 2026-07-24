@@ -1,0 +1,478 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { Readable, Writable } from 'node:stream'
+import * as acp from '@agentclientprotocol/sdk'
+import type {
+  PromptResponse,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionNotification,
+} from '@agentclientprotocol/sdk'
+import type {
+  ControlPermission,
+  ControlSession,
+  ControlSnapshot,
+  LiveFeedItem,
+} from './types.js'
+
+interface NewControlSession {
+  cwd: string
+  prompt: string
+  model?: string
+  reasoningEffort?: string
+}
+
+interface PromptControlSession {
+  sessionId: string
+  cwd: string
+  prompt: string
+}
+
+interface PendingPermission {
+  public: ControlPermission
+  resolve: (response: RequestPermissionResponse) => void
+}
+
+function now(): string {
+  return new Date().toISOString()
+}
+
+function compactPrompt(prompt: string, limit = 96): string {
+  const singleLine = prompt.replace(/\s+/g, ' ').trim()
+  return singleLine.length > limit ? `${singleLine.slice(0, limit - 1)}…` : singleLine
+}
+
+function safeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function sessionSeed(id: string, cwd: string, prompt: string, model = ''): ControlSession {
+  const timestamp = now()
+  return {
+    id,
+    cwd,
+    title: compactPrompt(prompt) || `Session ${id.slice(0, 8)}`,
+    model,
+    state: 'starting',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastPrompt: prompt,
+    stopReason: '',
+    error: '',
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costAmount: 0,
+    costCurrency: '',
+    feed: [],
+  }
+}
+
+function blockText(content: unknown): string {
+  if (!content || typeof content !== 'object') return ''
+  const block = content as { type?: string; text?: string; uri?: string }
+  if (block.type === 'text') return block.text || ''
+  return block.uri || ''
+}
+
+function feedItem(update: SessionNotification['update']): LiveFeedItem | null {
+  const timestamp = now()
+  const type = update.sessionUpdate
+  if (type === 'user_message_chunk' || type === 'agent_message_chunk' || type === 'agent_thought_chunk') {
+    return {
+      id: `${timestamp}:${type}:${Math.random()}`,
+      type: type === 'user_message_chunk' ? 'user' : type === 'agent_message_chunk' ? 'assistant' : 'thought',
+      title: type.replaceAll('_', ' '),
+      text: blockText(update.content),
+      status: '',
+      timestamp,
+    }
+  }
+  if (type === 'tool_call') {
+    return {
+      id: `${timestamp}:${update.toolCallId}`,
+      type: 'tool',
+      title: update.title,
+      text: '',
+      status: update.status || 'pending',
+      timestamp,
+    }
+  }
+  if (type === 'tool_call_update') {
+    return {
+      id: `${timestamp}:${update.toolCallId}:${Math.random()}`,
+      type: 'tool',
+      title: update.title || 'Tool update',
+      text: '',
+      status: update.status || '',
+      timestamp,
+    }
+  }
+  if (type === 'plan' || type === 'plan_update') {
+    return {
+      id: `${timestamp}:${type}:${Math.random()}`,
+      type: 'plan',
+      title: 'Plan updated',
+      text: JSON.stringify(update),
+      status: '',
+      timestamp,
+    }
+  }
+  return null
+}
+
+export class GrokController extends EventEmitter {
+  private process: ChildProcessWithoutNullStreams | null = null
+  private connection: acp.ClientConnection | null = null
+  private startPromise: Promise<void> | null = null
+  private starting = false
+  private connected = false
+  private agentName = ''
+  private agentVersion = ''
+  private error = ''
+  private sessions = new Map<string, ControlSession>()
+  private loadedSessions = new Set<string>()
+  private permissions = new Map<string, PendingPermission>()
+  private stderrTail: string[] = []
+
+  snapshot(): ControlSnapshot {
+    return {
+      generatedAt: now(),
+      connected: this.connected,
+      starting: this.starting,
+      agentName: this.agentName,
+      agentVersion: this.agentVersion,
+      error: this.error,
+      sessions: [...this.sessions.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      permissions: [...this.permissions.values()]
+        .map((item) => item.public)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    }
+  }
+
+  async start(): Promise<void> {
+    if (this.connected) return
+    if (this.startPromise) return this.startPromise
+    this.startPromise = this.startInternal().finally(() => {
+      this.startPromise = null
+    })
+    return this.startPromise
+  }
+
+  async stop(): Promise<void> {
+    this.permissions.forEach((permission) => {
+      permission.resolve({ outcome: { outcome: 'cancelled' } })
+    })
+    this.permissions.clear()
+    this.connection?.close()
+    this.connection = null
+    this.connected = false
+    this.process?.kill('SIGTERM')
+    this.process = null
+    this.emitSnapshot()
+  }
+
+  async createSession(input: NewControlSession): Promise<ControlSession> {
+    this.validatePrompt(input.prompt)
+    const cwd = await this.validateCwd(input.cwd)
+    await this.start()
+    const context = this.context()
+    const response = await context.request(acp.methods.agent.session.new, {
+      cwd,
+      mcpServers: [],
+      _meta: {
+        clientIdentifier: 'grok-ui',
+        modelId: input.model || undefined,
+        reasoningEffort: input.reasoningEffort || undefined,
+        yoloMode: false,
+        autoMode: false,
+      },
+    })
+    const session = sessionSeed(response.sessionId, cwd, input.prompt, input.model)
+    this.sessions.set(session.id, session)
+    this.loadedSessions.add(session.id)
+    this.emitSnapshot()
+    void this.runPrompt(session.id, input.prompt)
+    return session
+  }
+
+  async promptSession(input: PromptControlSession): Promise<ControlSession> {
+    this.validatePrompt(input.prompt)
+    const cwd = await this.validateCwd(input.cwd)
+    await this.start()
+    if (!this.loadedSessions.has(input.sessionId)) {
+      await this.context().request(acp.methods.agent.session.load, {
+        sessionId: input.sessionId,
+        cwd,
+        mcpServers: [],
+        _meta: { clientIdentifier: 'grok-ui' },
+      })
+      this.loadedSessions.add(input.sessionId)
+    }
+    const existing = this.sessions.get(input.sessionId)
+      || sessionSeed(input.sessionId, cwd, input.prompt)
+    const session: ControlSession = {
+      ...existing,
+      cwd,
+      title: existing.title || compactPrompt(input.prompt),
+      state: 'working',
+      updatedAt: now(),
+      lastPrompt: input.prompt,
+      stopReason: '',
+      error: '',
+    }
+    this.sessions.set(session.id, session)
+    this.emitSnapshot()
+    void this.runPrompt(session.id, input.prompt)
+    return session
+  }
+
+  async cancelSession(sessionId: string): Promise<void> {
+    await this.start()
+    const session = this.sessions.get(sessionId)
+    if (session) {
+      this.sessions.set(sessionId, { ...session, state: 'stopping', updatedAt: now() })
+      this.emitSnapshot()
+    }
+    await this.context().notify(acp.methods.agent.session.cancel, { sessionId })
+  }
+
+  resolvePermission(permissionId: string, optionId?: string): boolean {
+    const pending = this.permissions.get(permissionId)
+    if (!pending) return false
+    const selected = optionId && pending.public.options.some((option) => option.id === optionId)
+    pending.resolve(selected
+      ? { outcome: { outcome: 'selected', optionId } }
+      : { outcome: { outcome: 'cancelled' } })
+    this.permissions.delete(permissionId)
+    const session = this.sessions.get(pending.public.sessionId)
+    if (session) {
+      this.sessions.set(session.id, { ...session, state: 'working', updatedAt: now() })
+    }
+    this.emitSnapshot()
+    return true
+  }
+
+  private async startInternal(): Promise<void> {
+    this.starting = true
+    this.error = ''
+    this.emitSnapshot()
+    try {
+      const grokPath = process.env.GROK_BIN || 'grok'
+      const child = spawn(grokPath, ['agent', '--no-leader', 'stdio'], {
+        env: { ...process.env, NO_COLOR: '1' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      this.process = child
+      child.stderr.setEncoding('utf8')
+      child.stderr.on('data', (chunk: string) => {
+        this.stderrTail.push(...chunk.split('\n').filter(Boolean))
+        this.stderrTail = this.stderrTail.slice(-20)
+      })
+      child.once('exit', (code, signal) => {
+        this.connected = false
+        this.connection = null
+        this.process = null
+        this.error = `Grok control process exited (${signal || code || 'unknown'}).`
+        this.emitSnapshot()
+      })
+      child.once('error', (spawnError) => {
+        this.error = `Unable to start Grok: ${safeError(spawnError)}`
+        this.emitSnapshot()
+      })
+
+      const stream = acp.ndJsonStream(
+        Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
+        Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      )
+      const app = acp.client({ name: 'grok-ui' })
+        .onRequest(acp.methods.client.session.requestPermission, ({ params }) =>
+          this.requestPermission(params))
+        .onNotification(acp.methods.client.session.update, ({ params }) => {
+          this.sessionUpdate(params)
+        })
+      const connection = app.connect(stream)
+      this.connection = connection
+      const initialized = await connection.agent.request(acp.methods.agent.initialize, {
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: {
+          terminal: false,
+          plan: {},
+          session: {},
+          _meta: {
+            'x.ai/incrementalBashOutput': true,
+            'x.ai/bashOutputNoColor': true,
+            'x.ai/gitHeadChanged': true,
+          },
+        },
+        clientInfo: {
+          name: 'grok-ui',
+          title: 'Grok UI',
+          version: '0.2.0',
+        },
+      })
+      this.agentName = initialized.agentInfo?.title || initialized.agentInfo?.name || 'Grok'
+      this.agentVersion = initialized.agentInfo?.version || ''
+      if (initialized.authMethods?.length) {
+        const preferred = typeof initialized._meta?.defaultAuthMethodId === 'string'
+          ? initialized._meta.defaultAuthMethodId
+          : ''
+        const method = initialized.authMethods.find((item) => item.id === preferred)
+          || initialized.authMethods.find((item) => item.id === 'cached_token')
+          || initialized.authMethods[0]
+        await connection.agent.request(acp.methods.agent.authenticate, { methodId: method.id })
+      }
+      this.connected = true
+      this.error = ''
+      void connection.closed.then(() => {
+        if (this.connection === connection) {
+          this.connected = false
+          this.connection = null
+          this.emitSnapshot()
+        }
+      })
+    } catch (startError) {
+      this.connected = false
+      const detail = this.stderrTail.at(-1)
+      this.error = `${safeError(startError)}${detail ? ` — ${detail}` : ''}`
+      this.process?.kill('SIGTERM')
+      this.process = null
+      this.connection = null
+      throw startError
+    } finally {
+      this.starting = false
+      this.emitSnapshot()
+    }
+  }
+
+  private context(): acp.ClientContext {
+    if (!this.connection || !this.connected) throw new Error('Grok control channel is not connected.')
+    return this.connection.agent
+  }
+
+  private async runPrompt(sessionId: string, prompt: string): Promise<void> {
+    const existing = this.sessions.get(sessionId)
+    if (!existing) return
+    this.sessions.set(sessionId, {
+      ...existing,
+      state: 'working',
+      updatedAt: now(),
+      lastPrompt: prompt,
+      stopReason: '',
+      error: '',
+    })
+    this.emitSnapshot()
+    try {
+      const response = await this.context().request(acp.methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: 'text', text: prompt }],
+      })
+      this.completePrompt(sessionId, response)
+    } catch (promptError) {
+      const session = this.sessions.get(sessionId)
+      if (!session) return
+      this.sessions.set(sessionId, {
+        ...session,
+        state: 'failed',
+        updatedAt: now(),
+        error: safeError(promptError),
+      })
+      this.emitSnapshot()
+    }
+  }
+
+  private completePrompt(sessionId: string, response: PromptResponse) {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    this.sessions.set(sessionId, {
+      ...session,
+      state: 'idle',
+      updatedAt: now(),
+      stopReason: response.stopReason,
+      inputTokens: response.usage?.inputTokens || session.inputTokens,
+      outputTokens: response.usage?.outputTokens || session.outputTokens,
+      totalTokens: response.usage?.totalTokens || session.totalTokens,
+    })
+    this.emitSnapshot()
+  }
+
+  private requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
+    const id = `${params.sessionId}:${params.toolCall.toolCallId}:${Date.now()}`
+    return new Promise((resolve) => {
+      this.permissions.set(id, {
+        resolve,
+        public: {
+          id,
+          sessionId: params.sessionId,
+          title: params.toolCall.title || 'Grok tool request',
+          toolKind: params.toolCall.kind || 'other',
+          toolCallId: params.toolCall.toolCallId,
+          createdAt: now(),
+          options: params.options.map((option) => ({
+            id: option.optionId,
+            name: option.name,
+            kind: option.kind,
+          })),
+        },
+      })
+      const session = this.sessions.get(params.sessionId)
+      if (session) {
+        this.sessions.set(params.sessionId, { ...session, state: 'attention', updatedAt: now() })
+      }
+      this.emitSnapshot()
+    })
+  }
+
+  private sessionUpdate(params: SessionNotification) {
+    const session = this.sessions.get(params.sessionId)
+    if (!session) return
+    const update = params.update
+    let next = { ...session, updatedAt: now() }
+    if (update.sessionUpdate === 'session_info_update' && update.title) {
+      next.title = update.title
+    }
+    if (update.sessionUpdate === 'usage_update') {
+      next.costAmount = update.cost?.amount || next.costAmount
+      next.costCurrency = update.cost?.currency || next.costCurrency
+    }
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'agent_message_chunk') {
+      next.state = 'working'
+    }
+    const item = feedItem(update)
+    if (item) {
+      const previous = next.feed.at(-1)
+      if (
+        previous
+        && previous.type === item.type
+        && ['user', 'assistant', 'thought'].includes(item.type)
+      ) {
+        next.feed = [
+          ...next.feed.slice(0, -1),
+          { ...previous, text: `${previous.text}${item.text}`, timestamp: item.timestamp },
+        ]
+      } else {
+        next.feed = [...next.feed, item].slice(-80)
+      }
+    }
+    this.sessions.set(params.sessionId, next)
+    this.emitSnapshot()
+  }
+
+  private emitSnapshot() {
+    this.emit('control', this.snapshot())
+  }
+
+  private validatePrompt(prompt: string) {
+    if (!prompt.trim()) throw new Error('Prompt is required.')
+    if (prompt.length > 32_000) throw new Error('Prompt exceeds the 32,000 character limit.')
+  }
+
+  private async validateCwd(cwd: string): Promise<string> {
+    const { promises: fs } = await import('node:fs')
+    const { default: path } = await import('node:path')
+    const resolved = path.resolve(cwd)
+    const stat = await fs.stat(resolved).catch(() => null)
+    if (!stat?.isDirectory()) throw new Error('Workspace directory does not exist.')
+    return resolved
+  }
+}
