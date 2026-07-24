@@ -222,9 +222,6 @@ workbench, and Git inspection paths are functional and covered by automated
 tests. Grok Build and ACP evolve quickly, so compatibility fixes may be needed
 for future releases.
 
-Inspired by [Hermes HUD Web UI](https://github.com/joeynyc/hermes-hudui), rebuilt
-around Grok Build’s native session format and ACP implementation.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
