@@ -12,7 +12,7 @@ Include the affected version, deployment topology, reproduction steps, and impac
 
 ## Deployment guidance
 
-- Keep the default `127.0.0.1` bind whenever possible.
+- Keep the default loopback-only bind whenever possible.
 - Use an SSH tunnel or private VPN for access from another device.
 - Set a long, random `GROK_UI_TOKEN` before any non-loopback bind.
 - Terminate TLS in front of the server on untrusted networks.

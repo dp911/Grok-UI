@@ -4,7 +4,7 @@
   "description": "A local-first command center and live dashboard for Grok Build.",
   "private": true,
   "license": "MIT",
-  "author": "Joey Rodriguez",
+  "author": "Grok UI contributors",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/joeynyc/Grok-UI.git"

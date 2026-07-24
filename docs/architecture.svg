@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">Grok UI local command architecture</title>
+  <desc id="desc">A browser connects to a local Express and SSE supervisor, which reads Grok state, controls a Grok ACP process, and watches Git workspaces.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07090d"/>
+      <stop offset=".56" stop-color="#0b0d11"/>
+      <stop offset="1" stop-color="#17090d"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#ff3b30"/>
+      <stop offset="1" stop-color="#ff725f"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0 0 9 4.5 0 9Z" fill="#ff4a3d"/>
+    </marker>
+    <style>
+      .label{font:700 18px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:2px;fill:#f4f1e9}
+      .eyebrow{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:3px;fill:#ff5a4b}
+      .copy{font:400 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#858b96}
+      .node{fill:#0d1015;stroke:#343842;stroke-width:1.5}
+      .edge{fill:none;stroke:#ff4a3d;stroke-width:2;marker-end:url(#arrow)}
+      .return{fill:none;stroke:#65cfff;stroke-width:1.5;stroke-dasharray:6 8}
+    </style>
+  </defs>
+  <rect width="1200" height="560" rx="22" fill="url(#bg)"/>
+  <path d="M40 42H1160M40 518H1160" stroke="#252832"/>
+  <text x="54" y="72" class="eyebrow">LOCAL COMMAND PATH / 01</text>
+  <text x="1146" y="72" text-anchor="end" class="copy">NO CLOUD DASHBOARD REQUIRED</text>
+
+  <rect class="node" x="54" y="190" width="220" height="170" rx="8"/>
+  <circle cx="86" cy="225" r="9" fill="#ff4a3d" filter="url(#glow)"/>
+  <text x="108" y="231" class="eyebrow">INTERFACE</text>
+  <text x="80" y="278" class="label">BROWSER</text>
+  <text x="80" y="310" class="copy">React dashboard</text>
+  <text x="80" y="334" class="copy">SSE + authenticated API</text>
+
+  <rect x="372" y="138" width="330" height="274" rx="12" fill="#10130f" stroke="url(#red)" stroke-width="2"/>
+  <path d="M372 190H702M426 138V412M648 138V412" stroke="#272c25"/>
+  <text x="408" y="178" class="eyebrow">LOCAL SUPERVISOR</text>
+  <text x="408" y="230" class="label">EXPRESS + SSE</text>
+  <text x="408" y="267" class="copy">Live process monitor</text>
+  <text x="408" y="294" class="copy">ACP controller</text>
+  <text x="408" y="321" class="copy">Session projection</text>
+  <text x="408" y="348" class="copy">Workspace watcher</text>
+  <circle cx="649" cy="277" r="34" fill="none" stroke="#ff4a3d" stroke-width="2"/>
+  <circle cx="649" cy="277" r="17" fill="#ff4a3d" opacity=".18"/>
+  <path d="M631 277H667M649 259V295" stroke="#ff6859" stroke-width="2"/>
+
+  <rect class="node" x="802" y="103" width="330" height="104" rx="8"/>
+  <text x="832" y="139" class="eyebrow">LOCAL STATE</text>
+  <text x="832" y="171" class="label">GROK SESSION FILES</text>
+  <text x="832" y="192" class="copy">metadata · signals · bounded events</text>
+
+  <rect class="node" x="802" y="228" width="330" height="104" rx="8"/>
+  <text x="832" y="264" class="eyebrow">NATIVE CONTROL</text>
+  <text x="832" y="296" class="label">GROK ACP AGENT</text>
+  <text x="832" y="317" class="copy">prompt · approve · cancel · resume</text>
+
+  <rect class="node" x="802" y="353" width="330" height="104" rx="8"/>
+  <text x="832" y="389" class="eyebrow">CHANGE SURFACE</text>
+  <text x="832" y="421" class="label">GIT WORKSPACES</text>
+  <text x="832" y="442" class="copy">status · branch · bounded diff</text>
+
+  <path class="edge" d="M274 262H372"/>
+  <path class="return" d="M372 300H274"/>
+  <path class="edge" d="M702 204C750 204 752 155 802 155"/>
+  <path class="edge" d="M702 275H802"/>
+  <path class="edge" d="M702 346C750 346 752 405 802 405"/>
+  <text x="314" y="244" class="copy">commands</text>
+  <text x="302" y="324" class="copy">live events</text>
+
+  <text x="54" y="500" class="copy">LOOPBACK BY DEFAULT</text>
+  <text x="1146" y="500" text-anchor="end" class="copy">TOKEN REQUIRED BEYOND LOCALHOST</text>
+</svg>

@@ -38,7 +38,7 @@ Diff paths are resolved beneath the repository root. Reads are bounded, binary c
 
 ## Network boundary
 
-The production server binds to `127.0.0.1` by default. A non-loopback host requires `GROK_UI_TOKEN`.
+The production server binds to the loopback interface by default. A non-loopback host requires `GROK_UI_TOKEN`.
 
 Authenticated browsers receive an in-memory session ID through an `HttpOnly`, `SameSite=Strict` cookie. Mutations using that cookie are same-origin checked. API clients may use the configured token as a bearer credential.
 

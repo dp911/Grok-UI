@@ -1,137 +1,186 @@
+<div align="center">
+
+<img src="public/favicon.svg" width="112" alt="Grok UI"/>
+
 # Grok UI
 
-An unofficial, local-first command center for [Grok Build](https://github.com/xai-org/grok-build). Grok UI combines a live runtime feed, native Agent Client Protocol controls, Git change inspection, and historical telemetry in one responsive web interface.
+**Every Grok session — one living command center.**
 
-Inspired by [Hermes HUD Web UI](https://github.com/joeynyc/hermes-hudui), but built around Grok Build’s native session format and ACP implementation.
+An unofficial, local-first dashboard for Grok Build:
+watch active agents, control sessions over ACP, inspect Git changes,
+and move through your complete local history without leaving the browser.
 
+![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-5FA04E?logo=nodedotjs&logoColor=white)
+![React 19](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![Grok Build](https://img.shields.io/badge/Grok%20Build-native-111318)
+![Local first](https://img.shields.io/badge/privacy-local--first-D9FF43?labelColor=111318)
+![License: MIT](https://img.shields.io/badge/license-MIT-E44738)
+
+<img src="docs/grok-ui-dashboard.png" width="900" alt="Grok UI Event Horizon dashboard with live runtime telemetry"/>
+
+[**Quickstart**](#quickstart) · [**What it does**](#what-it-does) · [**Architecture**](#architecture) · [**Security**](#privacy-and-security)
+
+</div>
+
+> [!NOTE]
 > Grok UI is an independent community project. It is not affiliated with or endorsed by xAI.
 
-## Highlights
+## What it does
 
-- Live active-agent roster from Grok’s process registry
-- Real-time reasoning, response, plan, tool, phase, and usage events
-- Native ACP command deck for new and existing sessions
-- Full Session Workbench with live conversation, reasoning, tools, permissions, and follow-ups
-- Concurrent, independently cancellable Grok sessions
-- Real permission queue with Grok-provided approval options
-- Git branch, dirty-state, file-change, and bounded diff inspection
-- Context, token, and cost telemetry when Grok reports it
-- Desktop notifications when a session needs input
-- Durable managed sessions plus rename, archive, restore, and per-session change inspection
-- Activity history, models, tools, skills, and memory inventory
-- Persistent Operator and Event Horizon themes with live switching
-- Loopback-only default with mandatory token authentication for remote binding
-- Responsive desktop and mobile interface with keyboard navigation
+<table>
+<tr>
+<td width="50%" valign="top">
 
-## Requirements
+**◉ A runtime that tells the truth**
+
+Active agents come from Grok’s real process registry. Turns, phases,
+reasoning, responses, tools, context, and cost updates flow into the
+dashboard over one live event stream.
+
+</td>
+<td width="50%" valign="top">
+
+**⌘ Native session control**
+
+Create, resume, prompt, approve, and cancel Grok sessions through the
+Agent Client Protocol. Permission choices are rendered exactly as Grok
+provides them—never guessed or auto-approved.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**◇ One workbench per session**
+
+Open any recorded CLI session or managed lane for its conversation,
+reasoning, tool timeline, permission queue, token usage, and follow-up
+controls. Managed sessions survive dashboard restarts.
+
+</td>
+<td width="50%" valign="top">
+
+**↗ Git changes as they happen**
+
+The selected repository is watched live. Staged, unstaged, and untracked
+files update automatically, with bounded diffs and no manual refresh
+required.
+
+</td>
+</tr>
+</table>
+
+## Architecture
+
+<div align="center">
+<img src="docs/architecture.svg" width="820" alt="Browser connected to Grok UI server, local Grok state, ACP agent, and Git workspaces"/>
+</div>
+
+Grok UI runs as one local Express supervisor. The browser receives runtime,
+control, dashboard, and workspace events over SSE; commands return through
+authenticated API routes. Grok credentials never enter the browser.
+
+## Quickstart
+
+### Requirements
 
 - Node.js 22 or newer
-- A working `grok` installation
-- Grok Build already authenticated (`grok login`)
+- A working [`grok`](https://github.com/xai-org/grok-build) installation
+- Grok Build already authenticated with `grok login`
 
-Verify the CLI first:
+Verify the CLI:
 
 ```bash
 grok version
 grok models
 ```
 
-## Quick start
+Then run Grok UI:
 
 ```bash
-git clone git@github.com:joeynyc/Grok-UI.git
+git clone <repository-url>
 cd Grok-UI
 npm install
 npm run dev
 ```
 
-Development mode runs the API on `127.0.0.1:4310` and Vite on `127.0.0.1:5173`.
+Development mode starts the API and Vite dev server together. Open the
+localhost URL printed in the terminal.
 
 For the production server:
 
 ```bash
 npm run verify
-npm run build
 npm start
 ```
 
-Open [http://127.0.0.1:4310](http://127.0.0.1:4310).
+## Live runtime
 
-## Remote access
+Start `grok` in any workspace and the session appears as soon as its live
+process registers. The runtime view projects:
 
-Grok UI refuses to bind beyond loopback unless `GROK_UI_TOKEN` is configured:
+- agent state: working, waiting, idle, or needs input
+- current phase and active tool
+- structured user, assistant, reasoning, plan, and tool events
+- turns, tool calls, context usage, and reported cost
+- process identity and workspace
+
+Process liveness is rechecked continuously, so “live now” means an open Grok
+process—not a recently modified history file.
+
+## Session control
+
+Grok UI supervises `grok agent --no-leader stdio` and communicates through
+the official [Agent Client Protocol](https://agentclientprotocol.com/).
+
+It supports new sessions, `session/load`, prompts, permission requests,
+cancellation, and independently running managed lanes. Rename and archive
+actions are local Grok UI overlays; Grok’s own session files are never
+rewritten.
+
+## Themes
+
+Two complete visual systems ship with the dashboard:
+
+- **Operator** — carbon black, signal lime, and a precision HUD grid
+- **Event Horizon** — deep-space red, cold starlight, and glass command surfaces
+
+Theme selection stays in local browser storage and never changes session data.
+
+## Privacy and security
+
+- The server binds to the loopback interface by default.
+- Non-loopback binding requires `GROK_UI_TOKEN`.
+- Grok credentials never pass through the browser.
+- Authentication cookies are `HttpOnly` and `SameSite=Strict`.
+- API responses are non-cacheable and include restrictive security headers.
+- Raw system prompts and durable-memory bodies are not indexed.
+- File, diff, and event reads are bounded.
+- Diff access is restricted to workspaces associated with known sessions.
+- Grok UI contains no analytics or product telemetry.
+- Repository screenshots and diagrams use sanitized demo data only.
+
+For remote use, set a long random token, place TLS or a private tunnel in
+front of the server, and bind only to the interface you intend to expose:
 
 ```bash
-HOST=0.0.0.0 \
-GROK_UI_TOKEN='replace-with-a-long-random-token' \
+HOST='<bind-address>' \
+GROK_UI_TOKEN='<long-random-token>' \
 npm start
 ```
 
-The browser exchanges the token for a short-lived, `HttpOnly`, `SameSite=Strict` session cookie. State-changing cookie requests are same-origin checked. Bearer authentication is also accepted for API clients:
-
-```bash
-curl -H "Authorization: Bearer $GROK_UI_TOKEN" http://server:4310/api/control
-```
-
-Put TLS in front of Grok UI before using it across an untrusted network. A private VPN or SSH tunnel is strongly recommended:
-
-```bash
-ssh -L 4310:127.0.0.1:4310 your-machine
-```
+See [SECURITY.md](SECURITY.md) for the full deployment and reporting guidance.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HOST` | `127.0.0.1` | API bind address |
+| `HOST` | loopback | API bind interface |
 | `PORT` | `4310` | API port |
 | `GROK_HOME` | `~/.grok` | Grok state directory |
 | `GROK_BIN` | `grok` | Grok executable used by the ACP controller |
-| `GROK_UI_TOKEN` | empty | Required when `HOST` is not loopback |
-| `GROK_UI_STATE_DIR` | `~/.grok-ui` | Private Grok UI annotations and durable managed-session state |
-
-## How control works
-
-Grok UI supervises one `grok agent --no-leader stdio` process and communicates through the official [Agent Client Protocol](https://agentclientprotocol.com/).
-
-```text
-Browser
-  ├── SSE runtime + control updates
-  └── authenticated control requests
-          │
-          ▼
-Express supervisor
-  ├── filesystem watcher ── ~/.grok session state
-  ├── Git inspector ─────── selected workspaces
-  └── ACP client ────────── grok agent stdio
-                              ├── session/new + session/load
-                              ├── session/prompt
-                              ├── session/request_permission
-                              └── session/cancel
-```
-
-Permission decisions are never guessed or auto-approved. Grok’s own permission options are rendered in the approval queue and the user’s selected option is returned over the same ACP request.
-
-## Session Workbench
-
-Open any recorded session, active Grok CLI process, or Grok UI-managed lane to enter the workbench. It combines the bounded on-disk session transcript with live filesystem and ACP updates, so messages, reasoning, tool calls, status, and permission decisions remain current without polling the full archive.
-
-Sending a follow-up attaches a recorded CLI session to Grok UI’s ACP supervisor with `session/load`. Rename and archive actions are Grok UI overlays stored under `~/.grok-ui`; they never rewrite Grok’s own session files. Managed lanes, bounded event history, token totals, and costs are persisted locally and restored as idle after a Grok UI server restart.
-
-## Privacy and security
-
-- The server binds to loopback unless deliberately configured otherwise.
-- Remote binding without `GROK_UI_TOKEN` fails at startup.
-- Grok credentials never pass through the browser.
-- Authentication cookies are `HttpOnly` and `SameSite=Strict`.
-- API responses are non-cacheable and include restrictive browser security headers.
-- Raw system prompts and durable-memory bodies are not indexed.
-- Live conversation, thought, tool, and diff content is visible to authenticated dashboard users.
-- Diff paths are restricted to repositories associated with known Grok sessions.
-- File and event reads are bounded to avoid loading unbounded session logs.
-- Grok UI contains no analytics or product telemetry.
-
-See [SECURITY.md](SECURITY.md) for reporting and deployment guidance.
+| `GROK_UI_TOKEN` | empty | Required for non-loopback binding |
+| `GROK_UI_STATE_DIR` | `~/.grok-ui` | Private annotations and managed-session state |
 
 ## Commands
 
@@ -144,30 +193,38 @@ npm run verify    # Check, test, and build
 npm start         # Serve the production build
 ```
 
-## Repository layout
+## Repository map
 
 ```text
 server/
   grok-controller.ts      ACP lifecycle, prompts, approvals, cancellation
-  live-monitor.ts         event-driven Grok runtime projection
+  live-monitor.ts         active process and runtime event projection
   grok-store.ts           historical metadata aggregation
-  session-reader.ts       bounded conversation and tool timeline projection
+  session-reader.ts       bounded conversation and tool timeline
   session-state.ts        durable managed lanes and local annotations
-  workspace-inspector.ts  bounded Git status and diff inspection
-  security.ts             local/remote access gate
+  workspace-inspector.ts  live Git status and bounded diff inspection
+  security.ts             local and remote access gate
 src/
   views/ControlView.tsx   command deck and approval queue
-  views/ChangesView.tsx   repository change workbench
-  views/SessionWorkbench.tsx  live session operations
-  App.tsx                 live and historical dashboard shell
+  views/ChangesView.tsx   live repository change workbench
+  views/SessionWorkbench.tsx
+                            session timeline and operations
+  App.tsx                 dashboard shell and event-stream client
 ```
 
-The longer architecture and trust-boundary notes live in [docs/architecture.md](docs/architecture.md).
+The longer design and trust-boundary notes live in
+[docs/architecture.md](docs/architecture.md).
 
-## Status
+## Project status
 
-Grok UI is a release-candidate community project. The core monitor and control paths are functional and verified against Grok Build `0.2.111`. Grok Build and ACP evolve quickly; compatibility fixes may be needed for future releases.
+Grok UI is a release-candidate community project. Its monitor, control,
+workbench, and Git inspection paths are functional and covered by automated
+tests. Grok Build and ACP evolve quickly, so compatibility fixes may be needed
+for future releases.
+
+Inspired by [Hermes HUD Web UI](https://github.com/joeynyc/hermes-hudui), rebuilt
+around Grok Build’s native session format and ACP implementation.
 
 ## License
 
-[MIT](LICENSE)
+MIT — see [LICENSE](LICENSE).
