@@ -133,6 +133,7 @@ export class GrokController extends EventEmitter {
   private error = ''
   private sessions = new Map<string, ControlSession>()
   private loadedSessions = new Set<string>()
+  private replayingSessions = new Set<string>()
   private permissions = new Map<string, PendingPermission>()
   private stderrTail: string[] = []
   private persistTimer: NodeJS.Timeout | null = null
@@ -236,13 +237,18 @@ export class GrokController extends EventEmitter {
     const cwd = await this.validateCwd(input.cwd)
     await this.start()
     if (!this.loadedSessions.has(input.sessionId)) {
-      await this.context().request(acp.methods.agent.session.load, {
-        sessionId: input.sessionId,
-        cwd,
-        mcpServers: [],
-        _meta: { clientIdentifier: 'grok-ui' },
-      })
-      this.loadedSessions.add(input.sessionId)
+      this.replayingSessions.add(input.sessionId)
+      try {
+        await this.context().request(acp.methods.agent.session.load, {
+          sessionId: input.sessionId,
+          cwd,
+          mcpServers: [],
+          _meta: { clientIdentifier: 'grok-ui' },
+        })
+        this.loadedSessions.add(input.sessionId)
+      } finally {
+        this.replayingSessions.delete(input.sessionId)
+      }
     }
     const existing = this.sessions.get(input.sessionId)
       || sessionSeed(input.sessionId, cwd, input.prompt)
@@ -475,6 +481,17 @@ export class GrokController extends EventEmitter {
     }
     const item = feedItem(update)
     if (item) {
+      const replayDuplicate = this.replayingSessions.has(params.sessionId)
+        && next.feed.some((existing) => item.text
+          ? existing.type === item.type && existing.text.trim() === item.text.trim()
+          : existing.type === item.type
+            && existing.title === item.title
+            && existing.status === item.status)
+      if (replayDuplicate) {
+        this.sessions.set(params.sessionId, next)
+        this.emitSnapshot()
+        return
+      }
       const previous = next.feed.at(-1)
       if (
         previous
