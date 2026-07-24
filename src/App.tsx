@@ -6,6 +6,7 @@ import {
   Bot,
   Box,
   BrainCircuit,
+  Check,
   ChevronRight,
   CircleAlert,
   Command,
@@ -16,6 +17,7 @@ import {
   GitCompareArrows,
   Layers3,
   Menu,
+  Palette,
   RefreshCw,
   Radio,
   Search,
@@ -62,7 +64,38 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'activity', label: 'Activity', eyebrow: 'Signals', icon: Activity, shortcut: '6' },
   { id: 'library', label: 'Library', eyebrow: 'Capability', icon: Blocks, shortcut: '7' },
   { id: 'memory', label: 'Memory', eyebrow: 'Recall', icon: BrainCircuit, shortcut: '8' },
+  { id: 'themes', label: 'Themes', eyebrow: 'Appearance', icon: Palette, shortcut: '9' },
 ]
+
+type ThemeId = 'operator' | 'event-horizon'
+
+const THEMES: Array<{
+  id: ThemeId
+  name: string
+  eyebrow: string
+  description: string
+}> = [
+  {
+    id: 'operator',
+    name: 'Operator',
+    eyebrow: 'Original system',
+    description: 'Carbon black, signal lime, and the precision grid that launched Grok UI.',
+  },
+  {
+    id: 'event-horizon',
+    name: 'Event Horizon',
+    eyebrow: 'Deep-space system',
+    description: 'A cinematic red singularity, cold starlight, and glassy command surfaces.',
+  },
+]
+
+function storedTheme(): ThemeId {
+  try {
+    return localStorage.getItem('grok-ui-theme') === 'event-horizon' ? 'event-horizon' : 'operator'
+  } catch {
+    return 'operator'
+  }
+}
 
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
 const integer = new Intl.NumberFormat('en-US')
@@ -109,7 +142,17 @@ function App() {
   const [selectedSession, setSelectedSession] = useState<{ id: string; fallback: SessionRow | null } | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [theme, setTheme] = useState<ThemeId>(storedTheme)
   const lastAttentionRef = useRef(0)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem('grok-ui-theme', theme)
+    } catch {
+      // Theme selection still works when storage is unavailable.
+    }
+  }, [theme])
 
   const load = useCallback(async (force = false) => {
     if (force) setRefreshing(true)
@@ -225,7 +268,7 @@ function App() {
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} />
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       <AmbientGrid />
       <Sidebar
         active={view}
@@ -279,6 +322,7 @@ function App() {
             {view === 'activity' && <ActivityView data={data} />}
             {view === 'library' && <LibraryView data={data} query={query} onQuery={setQuery} />}
             {view === 'memory' && <MemoryView data={data} />}
+            {view === 'themes' && <ThemesView active={theme} onSelect={setTheme} />}
           </div>
         )}
       </main>
@@ -318,6 +362,63 @@ function AmbientGrid() {
       <div className="ambient-orb" />
       <div className="scan-beam" />
     </div>
+  )
+}
+
+function ThemesView({
+  active,
+  onSelect,
+}: {
+  active: ThemeId
+  onSelect: (theme: ThemeId) => void
+}) {
+  return (
+    <>
+      <PageIntro
+        index="09"
+        eyebrow="Visual systems"
+        title={<>Choose your<br /><em>command atmosphere.</em></>}
+        description="Switch the entire dashboard aesthetic without changing your data, sessions, or workflow. Your selection stays active on this device."
+      />
+
+      <section className="theme-grid section-gap" aria-label="Available themes">
+        {THEMES.map((theme, index) => {
+          const selected = theme.id === active
+          return (
+            <button
+              className={`theme-card theme-card-${theme.id} ${selected ? 'is-selected' : ''}`}
+              key={theme.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onSelect(theme.id)}
+            >
+              <span className="theme-preview" aria-hidden="true">
+                <span className="theme-preview-rail" />
+                <span className="theme-preview-stage">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </span>
+              <span className="theme-card-copy">
+                <span className="theme-card-index">0{index + 1} / 02</span>
+                <span className="theme-card-eyebrow">{theme.eyebrow}</span>
+                <strong>{theme.name}</strong>
+                <small>{theme.description}</small>
+              </span>
+              <span className="theme-select-state">
+                {selected ? <><Check size={14} /> Active theme</> : <>Apply theme <ArrowRight size={14} /></>}
+              </span>
+            </button>
+          )
+        })}
+      </section>
+
+      <section className="theme-note">
+        <span>LOCAL PREFERENCE</span>
+        <p>Themes are presentation-only and are stored in your browser. Grok session data never leaves the local dashboard.</p>
+      </section>
+    </>
   )
 }
 
@@ -392,7 +493,7 @@ function Sidebar({
           </div>
         </div>
         <div className="sidebar-foot">
-          <span>UI / 0.3.1</span>
+          <span>UI / 0.4.0</span>
           <span>ACP CONTROL</span>
         </div>
       </aside>
@@ -1260,7 +1361,7 @@ function PageIntro({
 }) {
   return (
     <header className="page-intro">
-      <div className="intro-index">{index} / 08</div>
+      <div className="intro-index">{index} / 09</div>
       <div>
         <div className="kicker">{eyebrow}</div>
         <h1>{title}</h1>
@@ -1337,7 +1438,7 @@ function CommandPalette({
 function MobileNav({ active, onNavigate }: { active: ViewId; onNavigate: (view: ViewId) => void }) {
   return (
     <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-      {NAV_ITEMS.map((item) => {
+      {NAV_ITEMS.filter((item) => item.id !== 'themes').map((item) => {
         const Icon = item.icon
         return <button key={item.id} className={active === item.id ? 'is-active' : ''} onClick={() => onNavigate(item.id)}><Icon size={18} /><span>{item.label}</span></button>
       })}

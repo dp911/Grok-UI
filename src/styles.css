@@ -87,6 +87,79 @@ select:focus-visible {
     linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 72px 72px,
     linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px) 0 0 / 72px 72px,
     var(--ink);
+  transition: color .35s ease, background-color .35s ease;
+}
+
+html[data-theme='event-horizon'] {
+  background: #02040a;
+}
+
+.app-shell[data-theme='event-horizon'] {
+  --ink: #03050a;
+  --surface: #070b13;
+  --surface-2: #0b111c;
+  --surface-3: #111927;
+  --paper: #f4f6fa;
+  --muted: #8f9aaa;
+  --line: rgba(185, 213, 241, .14);
+  --line-strong: rgba(205, 227, 249, .3);
+  --lime: #ff493d;
+  --lime-soft: rgba(255, 73, 61, .14);
+  --coral: #79cbff;
+  --coral-soft: rgba(121, 203, 255, .13);
+  --amber: #ffb156;
+  background:
+    linear-gradient(180deg, rgba(1, 3, 8, .18), rgba(2, 5, 11, .74) 55%, #03050a 100%),
+    linear-gradient(90deg, rgba(255, 51, 42, .05), transparent 32%, rgba(57, 160, 255, .045)),
+    url('/themes/event-horizon.png') center top / cover fixed no-repeat,
+    #03050a;
+}
+
+.app-shell[data-theme='event-horizon'] .sidebar {
+  background: rgba(3, 6, 12, .89);
+  box-shadow: 14px 0 60px rgba(0, 0, 0, .3);
+}
+
+.app-shell[data-theme='event-horizon'] .topbar {
+  background: rgba(3, 6, 12, .76);
+}
+
+.app-shell[data-theme='event-horizon'] .brand-mark {
+  border-color: rgba(244, 246, 250, .76);
+  box-shadow: 0 0 30px rgba(255, 55, 43, .12);
+}
+
+.app-shell[data-theme='event-horizon'] .brand-mark span {
+  box-shadow: 0 0 14px rgba(255, 55, 43, .78);
+}
+
+.app-shell[data-theme='event-horizon'] .ambient-orb {
+  width: 72vw;
+  height: 72vw;
+  right: -32vw;
+  top: -29vw;
+  background: radial-gradient(circle, rgba(255, 55, 43, .1), transparent 66%);
+}
+
+.app-shell[data-theme='event-horizon'] .scan-beam {
+  opacity: .52;
+  box-shadow: 0 0 12px rgba(255, 55, 43, .45);
+}
+
+.app-shell[data-theme='event-horizon'] .panel,
+.app-shell[data-theme='event-horizon'] .runtime-console,
+.app-shell[data-theme='event-horizon'] .agent-roster,
+.app-shell[data-theme='event-horizon'] .no-live-agent,
+.app-shell[data-theme='event-horizon'] .composer-panel,
+.app-shell[data-theme='event-horizon'] .approval-panel,
+.app-shell[data-theme='event-horizon'] .managed-lanes {
+  background: rgba(5, 9, 17, .82);
+  backdrop-filter: blur(18px);
+}
+
+.app-shell[data-theme='event-horizon'] .live-summary-strip,
+.app-shell[data-theme='event-horizon'] .system-chip {
+  background: rgba(8, 13, 22, .7);
 }
 
 .ambient-grid {
@@ -1443,6 +1516,232 @@ kbd {
 
 .section-gap {
   margin-top: 10px;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.theme-card {
+  --theme-preview-accent: var(--lime);
+  position: relative;
+  min-width: 0;
+  padding: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+  color: var(--paper);
+  border: 1px solid var(--line);
+  background: rgba(8, 10, 9, .8);
+  text-align: left;
+  cursor: pointer;
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
+}
+
+.theme-card-operator {
+  --theme-preview-accent: #d9ff43;
+}
+
+.theme-card-event-horizon {
+  --theme-preview-accent: #ff493d;
+}
+
+.theme-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--line-strong);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .28);
+}
+
+.theme-card.is-selected {
+  border-color: var(--lime);
+  box-shadow: inset 0 0 0 1px var(--lime), 0 24px 70px rgba(0, 0, 0, .34);
+}
+
+.theme-preview {
+  position: relative;
+  min-height: 260px;
+  display: grid;
+  grid-template-columns: 21% 1fr;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: #090a08;
+}
+
+.theme-preview::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, .72));
+}
+
+.theme-preview-rail {
+  position: relative;
+  z-index: 1;
+  border-right: 1px solid rgba(255, 255, 255, .13);
+  background: rgba(4, 5, 5, .82);
+  backdrop-filter: blur(8px);
+}
+
+.theme-preview-rail::before,
+.theme-preview-rail::after {
+  content: '';
+  position: absolute;
+  left: 19%;
+  right: 19%;
+  height: 2px;
+  background: rgba(255, 255, 255, .2);
+  box-shadow: 0 14px rgba(255, 255, 255, .09), 0 28px rgba(255, 255, 255, .09), 0 42px rgba(255, 255, 255, .09);
+}
+
+.theme-preview-rail::before {
+  top: 22px;
+  background: var(--theme-preview-accent);
+}
+
+.theme-preview-rail::after {
+  top: 95px;
+  opacity: .58;
+}
+
+.theme-preview-stage {
+  position: relative;
+  z-index: 1;
+  margin: 9% 7%;
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  grid-template-rows: 42% 1fr;
+  gap: 7px;
+}
+
+.theme-preview-stage::before,
+.theme-preview-stage i {
+  content: '';
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(6, 9, 8, .58);
+  backdrop-filter: blur(6px);
+}
+
+.theme-preview-stage::before {
+  grid-column: 1 / -1;
+}
+
+.theme-preview-stage i:first-of-type {
+  position: absolute;
+  width: 34%;
+  height: 2px;
+  left: 8%;
+  top: 18%;
+  border: 0;
+  background: var(--theme-preview-accent);
+  box-shadow: 0 9px rgba(255, 255, 255, .32), 0 18px rgba(255, 255, 255, .14);
+}
+
+.theme-card-operator .theme-preview {
+  background:
+    radial-gradient(circle at 78% 16%, rgba(217, 255, 67, .17), transparent 31%),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px) 0 0 / 30px 30px,
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px) 0 0 / 30px 30px,
+    #090a08;
+}
+
+.theme-card-event-horizon .theme-preview {
+  background:
+    linear-gradient(180deg, rgba(0, 3, 8, .05), rgba(1, 4, 10, .5)),
+    url('/themes/event-horizon.png') center / cover no-repeat,
+    #02050b;
+}
+
+.theme-card-event-horizon .theme-preview-stage::before,
+.theme-card-event-horizon .theme-preview-stage i {
+  background: rgba(3, 8, 16, .6);
+}
+
+.theme-card-copy {
+  position: relative;
+  min-height: 180px;
+  padding: 27px 28px 25px;
+  display: flex;
+  flex-direction: column;
+}
+
+.theme-card-index,
+.theme-card-eyebrow {
+  font-size: 8px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.theme-card-index {
+  position: absolute;
+  right: 28px;
+  top: 29px;
+  color: #60665c;
+}
+
+.theme-card-eyebrow {
+  color: var(--lime);
+}
+
+.theme-card-copy strong {
+  margin-top: 13px;
+  font-family: 'Syne Variable', sans-serif;
+  font-size: clamp(30px, 4vw, 52px);
+  line-height: .95;
+  letter-spacing: -.045em;
+}
+
+.theme-card-copy small {
+  max-width: 460px;
+  margin-top: 17px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.7;
+}
+
+.theme-select-state {
+  min-height: 48px;
+  padding: 0 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  font-size: 8px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.theme-card.is-selected .theme-select-state {
+  color: var(--lime);
+  background: var(--lime-soft);
+}
+
+.theme-note {
+  margin-top: 12px;
+  padding: 18px 20px;
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 18px;
+  border: 1px solid var(--line);
+  background: rgba(8, 10, 9, .64);
+}
+
+.theme-note span {
+  color: var(--lime);
+  font-size: 8px;
+  letter-spacing: .16em;
+}
+
+.theme-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.65;
 }
 
 .two-col-grid {
@@ -3960,6 +4259,14 @@ kbd {
     grid-column: 1 / -1;
     max-width: none;
   }
+
+  .theme-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-preview {
+    min-height: 300px;
+  }
 }
 
 @media (max-width: 680px) {
@@ -3967,6 +4274,29 @@ kbd {
 
   .topbar {
     padding: 0 15px;
+  }
+
+  .theme-preview {
+    min-height: 205px;
+  }
+
+  .theme-card-copy {
+    min-height: 165px;
+    padding: 23px 20px 21px;
+  }
+
+  .theme-card-index {
+    right: 20px;
+    top: 25px;
+  }
+
+  .theme-select-state {
+    padding: 0 20px;
+  }
+
+  .theme-note {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .topbar-path,

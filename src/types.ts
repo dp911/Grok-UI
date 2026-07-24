@@ -1,4 +1,4 @@
-export type ViewId = 'live' | 'control' | 'changes' | 'overview' | 'sessions' | 'activity' | 'library' | 'memory'
+export type ViewId = 'live' | 'control' | 'changes' | 'overview' | 'sessions' | 'activity' | 'library' | 'memory' | 'themes'
 export type SessionStatus = 'live' | 'recent' | 'idle' | 'attention'
 
 export interface SessionRow {

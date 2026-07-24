@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 — 2026-07-24
+
+- Added a persistent Themes section with live, one-click appearance switching.
+- Added the original Operator theme and the image-backed Event Horizon theme.
+- Added responsive theme previews and browser-local preference persistence.
+
 ## 0.3.1 — 2026-07-24
 
 - Fixed live detection for standalone Grok CLI sessions under `~/.grok`.

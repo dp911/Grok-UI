@@ -19,6 +19,7 @@ Inspired by [Hermes HUD Web UI](https://github.com/joeynyc/hermes-hudui), but bu
 - Desktop notifications when a session needs input
 - Durable managed sessions plus rename, archive, restore, and per-session change inspection
 - Activity history, models, tools, skills, and memory inventory
+- Persistent Operator and Event Horizon themes with live switching
 - Loopback-only default with mandatory token authentication for remote binding
 - Responsive desktop and mobile interface with keyboard navigation
 
