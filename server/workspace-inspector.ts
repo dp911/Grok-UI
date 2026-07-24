@@ -42,10 +42,12 @@ function parseNumstat(value: string, staged: boolean): Map<string, WorkspaceFile
 
 export class WorkspaceInspector extends EventEmitter {
   private watchers = new Map<string, FSWatcher[]>()
+  private watcherReady = new Map<string, Promise<void>>()
   private changeTimers = new Map<string, NodeJS.Timeout>()
 
-  private watch(root: string): void {
-    if (this.watchers.has(root)) return
+  private async watch(root: string): Promise<void> {
+    const existing = this.watcherReady.get(root)
+    if (existing) return existing
     const onChange = () => {
       const existing = this.changeTimers.get(root)
       if (existing) clearTimeout(existing)
@@ -75,6 +77,11 @@ export class WorkspaceInspector extends EventEmitter {
     files.on('all', onChange)
     gitState.on('all', onChange)
     this.watchers.set(root, [files, gitState])
+    const ready = Promise.all([files, gitState].map((watcher) =>
+      new Promise<void>((resolve) => watcher.once('ready', () => resolve())),
+    )).then(() => undefined)
+    this.watcherReady.set(root, ready)
+    await ready
   }
 
   async close(): Promise<void> {
@@ -82,6 +89,7 @@ export class WorkspaceInspector extends EventEmitter {
     this.changeTimers.clear()
     await Promise.all([...this.watchers.values()].flat().map((watcher) => watcher.close()))
     this.watchers.clear()
+    this.watcherReady.clear()
   }
 
   async snapshot(inputCwd: string): Promise<WorkspaceSnapshot> {
@@ -99,7 +107,7 @@ export class WorkspaceInspector extends EventEmitter {
         ? await git(root, ['rev-list', '--left-right', '--count', `HEAD...${upstream}`]).catch(() => '0\t0')
         : '0\t0'
       const [ahead, behind] = divergence.split(/\s+/).map((value) => Number(value) || 0)
-      this.watch(root)
+      await this.watch(root)
       const unstaged = parseNumstat(unstagedRaw, false)
       const staged = parseNumstat(stagedRaw, true)
       const files = new Map<string, WorkspaceFileChange>()
