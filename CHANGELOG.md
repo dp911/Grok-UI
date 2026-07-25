@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 — 2026-07-25
+
+- Added confirmed cancellation states for dashboard-managed Grok turns.
+- Cancelled pending permission requests when Stop is issued, as required by ACP.
+- Preserved the stopping state while Grok sends final tool and message updates.
+- Added retryable timeout and delivery-failure feedback when Stop is not confirmed.
+- Added cancellation timestamps, last-completed-tool context, and one-click Resume.
+- Added browser coverage for cancellation during permission and active-tool work,
+  plus controller coverage for unconfirmed cancellation timeouts.
+
 ## 0.5.1 — 2026-07-25
 
 - Made Event Horizon the default visual system for first-time launches.

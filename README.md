@@ -154,9 +154,10 @@ Grok UI supervises `grok agent --no-leader stdio` and communicates through
 the official [Agent Client Protocol](https://agentclientprotocol.com/).
 
 It supports new sessions, `session/load`, prompts, permission requests,
-cancellation, and independently running managed lanes. Rename and archive
-actions are local Grok UI overlays; Grok’s own session files are never
-rewritten.
+confirmed cancellation, and independently running managed lanes. Stop also
+cancels pending permissions, preserves final tool updates, surfaces a retry when
+Grok does not confirm, and leaves the lane ready to resume. Rename and archive
+actions are local Grok UI overlays; Grok’s own session files are never rewritten.
 
 ## Themes
 

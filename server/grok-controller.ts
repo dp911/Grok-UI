@@ -61,6 +61,9 @@ function sessionSeed(id: string, cwd: string, prompt: string, model = ''): Contr
     lastPrompt: prompt,
     stopReason: '',
     error: '',
+    cancellationStatus: 'none',
+    cancelRequestedAt: '',
+    cancelledAt: '',
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
@@ -136,10 +139,14 @@ export class GrokController extends EventEmitter {
   private loadedSessions = new Set<string>()
   private replayingSessions = new Set<string>()
   private permissions = new Map<string, PendingPermission>()
+  private cancellationTimers = new Map<string, NodeJS.Timeout>()
   private stderrTail: string[] = []
   private persistTimer: NodeJS.Timeout | null = null
 
-  constructor(private readonly sessionState?: SessionStateStore) {
+  constructor(
+    private readonly sessionState?: SessionStateStore,
+    private readonly cancellationTimeoutMs = 12_000,
+  ) {
     super()
   }
 
@@ -180,6 +187,8 @@ export class GrokController extends EventEmitter {
   async stop(): Promise<void> {
     if (this.persistTimer) clearTimeout(this.persistTimer)
     this.persistTimer = null
+    this.cancellationTimers.forEach((timer) => clearTimeout(timer))
+    this.cancellationTimers.clear()
     await this.persist()
     this.permissions.forEach((permission) => {
       permission.resolve({ outcome: { outcome: 'cancelled' } })
@@ -262,6 +271,9 @@ export class GrokController extends EventEmitter {
       lastPrompt: input.prompt,
       stopReason: '',
       error: '',
+      cancellationStatus: 'none',
+      cancelRequestedAt: '',
+      cancelledAt: '',
     }
     this.sessions.set(session.id, session)
     this.emitSnapshot()
@@ -272,11 +284,48 @@ export class GrokController extends EventEmitter {
   async cancelSession(sessionId: string): Promise<void> {
     await this.start()
     const session = this.sessions.get(sessionId)
-    if (session) {
-      this.sessions.set(sessionId, { ...session, state: 'stopping', updatedAt: now() })
-      this.emitSnapshot()
+    if (!session) throw new Error('Managed session was not found.')
+    const canCancel = ['working', 'starting', 'attention', 'stopping'].includes(session.state)
+      || ['timed_out', 'failed'].includes(session.cancellationStatus)
+    if (!canCancel) throw new Error('This session does not have an active turn to stop.')
+
+    const requestedAt = now()
+    this.sessions.set(sessionId, {
+      ...session,
+      state: 'stopping',
+      updatedAt: requestedAt,
+      stopReason: 'stop_requested',
+      error: '',
+      cancellationStatus: 'requested',
+      cancelRequestedAt: requestedAt,
+      cancelledAt: '',
+    })
+
+    for (const [permissionId, pending] of this.permissions) {
+      if (pending.public.sessionId !== sessionId) continue
+      pending.resolve({ outcome: { outcome: 'cancelled' } })
+      this.permissions.delete(permissionId)
     }
-    await this.context().notify(acp.methods.agent.session.cancel, { sessionId })
+    this.scheduleCancellationTimeout(sessionId)
+    this.emitSnapshot()
+
+    try {
+      await this.context().notify(acp.methods.agent.session.cancel, { sessionId })
+    } catch (cancelError) {
+      this.clearCancellationTimer(sessionId)
+      const current = this.sessions.get(sessionId)
+      if (current) {
+        this.sessions.set(sessionId, {
+          ...current,
+          state: 'failed',
+          updatedAt: now(),
+          error: `Unable to send Stop to Grok: ${safeError(cancelError)}`,
+          cancellationStatus: 'failed',
+        })
+        this.emitSnapshot()
+      }
+      throw cancelError
+    }
   }
 
   resolvePermission(permissionId: string, optionId?: string): boolean {
@@ -402,7 +451,11 @@ export class GrokController extends EventEmitter {
       lastPrompt: prompt,
       stopReason: '',
       error: '',
+      cancellationStatus: 'none',
+      cancelRequestedAt: '',
+      cancelledAt: '',
     })
+    this.clearCancellationTimer(sessionId)
     this.emitSnapshot()
     try {
       const response = await this.context().request(acp.methods.agent.session.prompt, {
@@ -413,6 +466,21 @@ export class GrokController extends EventEmitter {
     } catch (promptError) {
       const session = this.sessions.get(sessionId)
       if (!session) return
+      this.clearCancellationTimer(sessionId)
+      if (['requested', 'timed_out'].includes(session.cancellationStatus)) {
+        const timestamp = now()
+        this.sessions.set(sessionId, {
+          ...session,
+          state: 'cancelled',
+          updatedAt: timestamp,
+          stopReason: 'cancelled',
+          error: '',
+          cancellationStatus: 'confirmed',
+          cancelledAt: timestamp,
+        })
+        this.emitSnapshot()
+        return
+      }
       this.sessions.set(sessionId, {
         ...session,
         state: 'failed',
@@ -426,11 +494,17 @@ export class GrokController extends EventEmitter {
   private completePrompt(sessionId: string, response: PromptResponse) {
     const session = this.sessions.get(sessionId)
     if (!session) return
+    this.clearCancellationTimer(sessionId)
+    const timestamp = now()
+    const cancelled = response.stopReason === 'cancelled'
     this.sessions.set(sessionId, {
       ...session,
-      state: 'idle',
-      updatedAt: now(),
+      state: cancelled ? 'cancelled' : 'idle',
+      updatedAt: timestamp,
       stopReason: response.stopReason,
+      error: '',
+      cancellationStatus: cancelled ? 'confirmed' : 'none',
+      cancelledAt: cancelled ? timestamp : '',
       inputTokens: response.usage?.inputTokens || session.inputTokens,
       outputTokens: response.usage?.outputTokens || session.outputTokens,
       totalTokens: response.usage?.totalTokens || session.totalTokens,
@@ -439,6 +513,10 @@ export class GrokController extends EventEmitter {
   }
 
   private requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
+    const current = this.sessions.get(params.sessionId)
+    if (current && ['requested', 'confirmed', 'timed_out'].includes(current.cancellationStatus)) {
+      return Promise.resolve({ outcome: { outcome: 'cancelled' } })
+    }
     const id = `${params.sessionId}:${params.toolCall.toolCallId}:${Date.now()}`
     return new Promise((resolve) => {
       this.permissions.set(id, {
@@ -477,10 +555,16 @@ export class GrokController extends EventEmitter {
       next.costAmount = update.cost?.amount || next.costAmount
       next.costCurrency = update.cost?.currency || next.costCurrency
     }
-    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'agent_message_chunk') {
+    if (
+      (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'agent_message_chunk')
+      && next.cancellationStatus === 'none'
+    ) {
       next.state = 'working'
     }
-    const item = feedItem(update)
+    let item = feedItem(update)
+    if (item?.type === 'tool' && item.status === 'failed' && next.cancellationStatus === 'requested') {
+      item = { ...item, status: 'cancelled' }
+    }
     if (item) {
       const replayDuplicate = this.replayingSessions.has(params.sessionId)
         && next.feed.some((existing) => item.text
@@ -509,6 +593,31 @@ export class GrokController extends EventEmitter {
     }
     this.sessions.set(params.sessionId, next)
     this.emitSnapshot()
+  }
+
+  private scheduleCancellationTimeout(sessionId: string) {
+    this.clearCancellationTimer(sessionId)
+    const timer = setTimeout(() => {
+      this.cancellationTimers.delete(sessionId)
+      const session = this.sessions.get(sessionId)
+      if (!session || session.cancellationStatus !== 'requested') return
+      this.sessions.set(sessionId, {
+        ...session,
+        state: 'failed',
+        updatedAt: now(),
+        error: 'Grok did not confirm the stop request in time. Retry Stop or resume when the turn settles.',
+        cancellationStatus: 'timed_out',
+      })
+      this.emitSnapshot()
+    }, this.cancellationTimeoutMs)
+    timer.unref()
+    this.cancellationTimers.set(sessionId, timer)
+  }
+
+  private clearCancellationTimer(sessionId: string) {
+    const timer = this.cancellationTimers.get(sessionId)
+    if (timer) clearTimeout(timer)
+    this.cancellationTimers.delete(sessionId)
   }
 
   private emitSnapshot() {
