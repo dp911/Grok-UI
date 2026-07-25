@@ -101,6 +101,7 @@ Then run Grok UI:
 git clone <repository-url>
 cd Grok-UI
 npm install
+npm run doctor
 npm run dev
 ```
 
@@ -110,9 +111,13 @@ localhost URL printed in the terminal.
 For the production server:
 
 ```bash
-npm run verify
 npm start
 ```
+
+`npm start` creates the production build automatically on a fresh clone.
+Run `npm run doctor` at any time to check Node, the Grok CLI, authentication,
+and local state without exposing machine-specific paths. A new installation
+opens with a three-step first-session guide instead of an empty dashboard.
 
 ## Live runtime
 
@@ -152,6 +157,8 @@ Theme selection stays in local browser storage and never changes session data.
 - The server binds to the loopback interface by default.
 - Non-loopback binding requires `GROK_UI_TOKEN`.
 - Grok credentials never pass through the browser.
+- Persistent Privacy Mode replaces visible session names, paths, identifiers,
+  event content, and file names with stable presentation-safe aliases.
 - Authentication cookies are `HttpOnly` and `SameSite=Strict`.
 - API responses are non-cacheable and include restrictive security headers.
 - Raw system prompts and durable-memory bodies are not indexed.
@@ -186,11 +193,14 @@ See [SECURITY.md](SECURITY.md) for the full deployment and reporting guidance.
 
 ```bash
 npm run dev       # Run API and Vite with file watching
+npm run doctor    # Check Node, Grok CLI, authentication, and local state
+npm run setup     # Run preflight checks and create a production build
 npm run check     # Type-check client and server
 npm test          # Run unit and integration tests
 npm run build     # Produce client and server builds
 npm run verify    # Check, test, and build
-npm start         # Serve the production build
+npm start         # Build when needed, then serve the production app
+npm run serve     # Serve an existing production build without rebuilding
 ```
 
 ## Repository map

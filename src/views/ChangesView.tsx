@@ -16,6 +16,7 @@ import type {
   WorkspaceDiff,
   WorkspaceSnapshot,
 } from '../types'
+import { usePrivacy } from '../privacy'
 
 interface ChangesViewProps {
   data: DashboardPayload
@@ -25,6 +26,7 @@ interface ChangesViewProps {
 }
 
 export function ChangesView({ data, live, connected, workspaceChange }: ChangesViewProps) {
+  const privacy = usePrivacy()
   const workspaces = useMemo(() => [...new Set([
     ...(live?.agents.map((agent) => agent.cwd) || []),
     ...data.sessions.map((session) => session.cwd),
@@ -102,7 +104,9 @@ export function ChangesView({ data, live, connected, workspaceChange }: ChangesV
         <label>
           <span>WORKSPACE</span>
           <select value={cwd} onChange={(event) => setCwd(event.target.value)}>
-            {workspaces.map((workspace) => <option value={workspace} key={workspace}>{workspace}</option>)}
+            {workspaces.map((workspace) => (
+              <option value={workspace} key={workspace}>{privacy.path(workspace)}</option>
+            ))}
           </select>
         </label>
         <span className={`workspace-live-state ${connected ? 'is-connected' : ''}`}>
@@ -114,10 +118,10 @@ export function ChangesView({ data, live, connected, workspaceChange }: ChangesV
         </button>
       </section>
 
-      {error && <div className="control-banner is-error"><span>{error}</span></div>}
+      {error && <div className="control-banner is-error"><span>{privacy.content(error)}</span></div>}
 
       <section className="git-summary-strip">
-        <div><GitBranch size={16} /><span>BRANCH</span><strong>{snapshot?.branch || '—'}</strong></div>
+        <div><GitBranch size={16} /><span>BRANCH</span><strong>{snapshot?.branch ? privacy.content(snapshot.branch) : '—'}</strong></div>
         <div><FileCode2 size={16} /><span>FILES</span><strong>{snapshot?.files.length || 0}</strong></div>
         <div className="git-add"><ArrowUp size={16} /><span>ADDED</span><strong>+{snapshot?.additions || 0}</strong></div>
         <div className="git-delete"><ArrowDown size={16} /><span>REMOVED</span><strong>−{snapshot?.deletions || 0}</strong></div>
@@ -138,21 +142,31 @@ export function ChangesView({ data, live, connected, workspaceChange }: ChangesV
             {files.map((file) => (
               <button className={selected === file.path ? 'is-active' : ''} onClick={() => void openDiff(file.path)} key={file.path}>
                 <span className={`file-status status-${file.status.replaceAll(' ', '')}`}>{file.status}</span>
-                <span className="file-path">{file.path}</span>
+                <span className="file-path">{privacy.file(file.path)}</span>
                 <span className="file-delta"><i>+{file.additions}</i><em>−{file.deletions}</em></span>
               </button>
             ))}
-            {!files.length && <p className="files-empty">{snapshot?.repository ? 'Working tree clean.' : snapshot?.error || 'No workspace selected.'}</p>}
+            {!files.length && (
+              <p className="files-empty">
+                {snapshot?.repository
+                  ? 'Working tree clean.'
+                  : snapshot?.error
+                    ? privacy.content(snapshot.error)
+                    : 'No workspace selected.'}
+              </p>
+            )}
           </div>
         </aside>
 
         <section className="diff-viewer">
           <header>
-            <div><span className="panel-index">02</span><h2>{selected || 'Select a file'}</h2></div>
+            <div><span className="panel-index">02</span><h2>{selected ? privacy.file(selected) : 'Select a file'}</h2></div>
             {diff?.truncated && <span className="diff-truncated">TRUNCATED</span>}
           </header>
           {diff ? (
-            <pre aria-label={`Diff for ${diff.path}`}>{diff.diff || 'No textual diff available.'}</pre>
+            <pre aria-label={`Diff for ${privacy.file(diff.path)}`}>
+              {privacy.enabled ? privacy.content(diff.diff) : diff.diff || 'No textual diff available.'}
+            </pre>
           ) : (
             <div className="diff-empty"><Braces size={24} /><span>Choose a changed file to inspect its patch.</span></div>
           )}

@@ -23,6 +23,7 @@ import type {
   DashboardPayload,
   LiveSnapshot,
 } from '../types'
+import { usePrivacy } from '../privacy'
 
 interface ControlViewProps {
   data: DashboardPayload
@@ -44,6 +45,7 @@ function uniqueWorkspaces(data: DashboardPayload, live: LiveSnapshot | null): st
 }
 
 export function ControlView({ data, live, control, onRefresh, onOpenSession }: ControlViewProps) {
+  const privacy = usePrivacy()
   const workspaces = useMemo(() => uniqueWorkspaces(data, live), [data, live])
   const resumable = useMemo(() => {
     const seen = new Set<string>()
@@ -94,7 +96,7 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
         const selected = resumable.find((session) => session.id === sessionId)
         if (!selected) throw new Error('Choose a session to resume.')
         await promptControlSession(selected.id, { cwd: selected.cwd, prompt })
-        setMessage(`Prompt sent to ${selected.title}.`)
+        setMessage(`Prompt sent to ${privacy.sessionTitle(selected.title, selected.id)}.`)
       } else {
         await createControlSession({ cwd, prompt, model, reasoningEffort })
         setMessage('New Grok lane launched.')
@@ -135,7 +137,7 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
   return (
     <>
       <section className="page-intro command-intro">
-        <div className="page-intro-index">02 / 08</div>
+        <div className="page-intro-index">02 / 09</div>
         <div className="page-intro-copy">
           <div className="kicker"><Command size={14} /> Command deck</div>
           <h1>Don’t just watch.<br /><em>Run the room.</em></h1>
@@ -163,9 +165,9 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
       </section>
 
       {control?.error && (
-        <div className="control-banner is-error"><ShieldAlert size={17} /><span>{control.error}</span></div>
+        <div className="control-banner is-error"><ShieldAlert size={17} /><span>{privacy.content(control.error)}</span></div>
       )}
-      {error && <div className="control-banner is-error"><X size={17} /><span>{error}</span></div>}
+      {error && <div className="control-banner is-error"><X size={17} /><span>{privacy.content(error)}</span></div>}
       {message && <div className="control-banner is-success"><Check size={17} /><span>{message}</span></div>}
 
       <section className="command-deck-grid section-gap">
@@ -193,7 +195,9 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
               <select value={sessionId} onChange={(event) => chooseSession(event.target.value)} required>
                 <option value="">Choose a recorded session…</option>
                 {resumable.map((session) => (
-                  <option value={session.id} key={session.id}>{session.title} — {session.id.slice(0, 8)}</option>
+                  <option value={session.id} key={session.id}>
+                    {privacy.sessionTitle(session.title, session.id)} — {privacy.identifier(session.id)}
+                  </option>
                 ))}
               </select>
             </label>
@@ -203,13 +207,14 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
                 <span>WORKSPACE</span>
                 <input
                   list="grok-workspaces"
-                  value={cwd}
+                  value={privacy.enabled ? '' : cwd}
                   onChange={(event) => setCwd(event.target.value)}
-                  placeholder="/absolute/path/to/project"
-                  required
+                  placeholder={privacy.enabled ? 'Workspace path hidden — turn Privacy Mode off to edit' : '/absolute/path/to/project'}
+                  readOnly={privacy.enabled}
+                  required={!privacy.enabled}
                 />
                 <datalist id="grok-workspaces">
-                  {workspaces.map((workspace) => <option value={workspace} key={workspace} />)}
+                  {!privacy.enabled && workspaces.map((workspace) => <option value={workspace} key={workspace} />)}
                 </datalist>
               </label>
               <div className="control-field-row">
@@ -243,7 +248,10 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
             <small>{compact(prompt.length)} / 32K</small>
           </label>
 
-          <button className="launch-button" disabled={submitting || !control?.connected}>
+          <button
+            className="launch-button"
+            disabled={submitting || !control?.connected || (mode === 'new' && !cwd)}
+          >
             <span>{submitting ? 'DISPATCHING' : mode === 'new' ? 'LAUNCH AGENT' : 'SEND PROMPT'}</span>
             <CornerDownLeft size={17} />
           </button>
@@ -267,8 +275,8 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
                   <div className="approval-card-head">
                     <ShieldAlert size={18} />
                     <div>
-                      <span>{permission.toolKind} / {permission.toolCallId.slice(-8)}</span>
-                      <h3>{permission.title}</h3>
+                      <span>{permission.toolKind} / {privacy.identifier(permission.toolCallId)}</span>
+                      <h3>{privacy.content(permission.title)}</h3>
                     </div>
                   </div>
                   <div className="approval-options">
@@ -311,8 +319,8 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
                 <div className="lane-index">L{String(index + 1).padStart(2, '0')}</div>
                 <div className="lane-main">
                   <div className="lane-state"><i /> {session.state}</div>
-                  <h3>{session.title}</h3>
-                  <p><FolderGit2 size={13} /> {session.cwd}</p>
+                  <h3>{privacy.sessionTitle(session.title, session.id)}</h3>
+                  <p><FolderGit2 size={13} /> {privacy.path(session.cwd)}</p>
                 </div>
                 <div className="lane-telemetry">
                   <div><span>TOKENS</span><strong>{compact(session.totalTokens)}</strong></div>
@@ -345,7 +353,7 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
           <header>
             <div>
               <span className="panel-index">04</span>
-              <div><span>MANAGED SESSION STREAM</span><h2>{activeLane.title}</h2></div>
+              <div><span>MANAGED SESSION STREAM</span><h2>{privacy.sessionTitle(activeLane.title, activeLane.id)}</h2></div>
             </div>
             <span>{activeLane.feed.length} EVENTS</span>
           </header>
@@ -359,7 +367,7 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
                     <em>{item.status}</em>
                     <time>{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                   </header>
-                  <p>{item.text || item.title}</p>
+                  <p>{privacy.content(item.text || item.title)}</p>
                 </div>
               </article>
             )) : (

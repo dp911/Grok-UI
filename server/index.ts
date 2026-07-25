@@ -62,12 +62,12 @@ app.get('/api/live', (_request, response) => {
   response.json(liveMonitor.snapshot())
 })
 
-app.get('/api/control', async (_request, response) => {
-  try {
-    await controller.start()
-  } catch {
-    // The snapshot includes the actionable startup error.
-  }
+app.get('/api/control', (_request, response) => {
+  // Control startup may wait on CLI authentication. Return immediately so a
+  // first-time user can still reach onboarding and the read-only dashboard.
+  void controller.start().catch(() => {
+    // The next control snapshot and SSE event include the startup error.
+  })
   response.json(controller.snapshot())
 })
 

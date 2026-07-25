@@ -39,6 +39,7 @@ import type {
   WorkspaceDiff,
   WorkspaceSnapshot,
 } from '../types'
+import { usePrivacy } from '../privacy'
 
 type WorkbenchTab = 'timeline' | 'changes' | 'specs'
 
@@ -85,6 +86,7 @@ export function SessionWorkbench({
   onClose,
   onUpdated,
 }: SessionWorkbenchProps) {
+  const privacy = usePrivacy()
   const [data, setData] = useState<SessionWorkbenchData | null>(null)
   const [tab, setTab] = useState<WorkbenchTab>('timeline')
   const [loading, setLoading] = useState(true)
@@ -251,7 +253,12 @@ export function SessionWorkbench({
   const turnCount = useMemo(() => transcript.filter((item) => item.type === 'user').length, [transcript])
 
   return (
-    <div className="workbench-layer" role="dialog" aria-modal="true" aria-label={`Session workbench: ${session?.title || sessionId}`}>
+    <div
+      className="workbench-layer"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Session workbench: ${privacy.sessionTitle(session?.title || sessionId, sessionId)}`}
+    >
       <button className="workbench-scrim" onClick={onClose} aria-label="Close session workbench" />
       <section className="session-workbench">
         <header className="workbench-head">
@@ -268,13 +275,13 @@ export function SessionWorkbench({
             ) : (
               <div className="workbench-title">
                 <div>
-                  <span>SESSION / {sessionId.slice(0, 13)}</span>
-                  <h1>{session?.title || `Session ${sessionId.slice(0, 8)}`}</h1>
+                  <span>SESSION / {privacy.identifier(sessionId)}</span>
+                  <h1>{privacy.sessionTitle(session?.title || `Session ${sessionId.slice(0, 8)}`, sessionId)}</h1>
                 </div>
                 <button onClick={() => setRenaming(true)} aria-label="Rename session"><Pencil size={15} /></button>
               </div>
             )}
-            <p><FolderGit2 size={14} /> {session?.cwd || 'Resolving workspace…'}</p>
+            <p><FolderGit2 size={14} /> {session?.cwd ? privacy.path(session.cwd) : 'Resolving workspace…'}</p>
           </div>
           <div className="workbench-head-actions">
             <button className="workbench-archive" onClick={() => void toggleArchive()}>
@@ -317,7 +324,7 @@ export function SessionWorkbench({
         </nav>
 
         {error
-          ? <div className="workbench-banner is-error"><ShieldAlert size={16} /><span>{error}</span></div>
+          ? <div className="workbench-banner is-error"><ShieldAlert size={16} /><span>{privacy.content(error)}</span></div>
           : message
             ? <div className="workbench-banner is-success"><Check size={16} /><span>{message}</span></div>
             : <div className="workbench-banner-placeholder" aria-hidden="true" />}
@@ -383,11 +390,12 @@ function Timeline({
   feedRef: React.RefObject<HTMLDivElement | null>
   onDecide: (permissionId: string, optionId?: string) => Promise<void>
 }) {
+  const privacy = usePrivacy()
   return (
     <div className="workbench-timeline" ref={feedRef}>
       {permissions.map((permission) => (
         <article className="workbench-permission" key={permission.id}>
-          <div><ShieldAlert size={18} /><span><small>PERMISSION REQUIRED</small><strong>{permission.title}</strong></span></div>
+          <div><ShieldAlert size={18} /><span><small>PERMISSION REQUIRED</small><strong>{privacy.content(permission.title)}</strong></span></div>
           <div>
             {permission.options.map((option) => (
               <button
@@ -411,11 +419,11 @@ function Timeline({
           <div className="workbench-event-content">
             <header>
               <span>{item.type === 'assistant' ? 'GROK' : item.type.toUpperCase()}</span>
-              <strong>{item.title}</strong>
+              <strong>{privacy.content(item.title)}</strong>
               {item.status && <em>{item.status}</em>}
               <time>{time(item.timestamp)}</time>
             </header>
-            {item.text && <p>{item.text}</p>}
+            {item.text && <p>{privacy.content(item.text)}</p>}
           </div>
         </article>
       )) : (
@@ -443,16 +451,26 @@ function Changes({
   onOpen: (file: string) => Promise<void>
   onRefresh: () => Promise<void>
 }) {
+  const privacy = usePrivacy()
   if (!workspace) {
     return <div className="workbench-loading"><LoaderCircle size={22} className="is-spinning" /><span>Reading session workspace…</span></div>
   }
   if (!workspace.repository) {
-    return <div className="workbench-empty"><FolderGit2 size={24} /><strong>No Git repository</strong><p>{workspace.error}</p></div>
+    return (
+      <div className="workbench-empty">
+        <FolderGit2 size={24} />
+        <strong>No Git repository</strong>
+        <p>{privacy.content(workspace.error)}</p>
+      </div>
+    )
   }
   return (
     <div className="workbench-changes">
       <header>
-        <div><GitBranch size={16} /><span><strong>{workspace.branch}</strong><small>{workspace.root}</small></span></div>
+        <div>
+          <GitBranch size={16} />
+          <span><strong>{privacy.content(workspace.branch)}</strong><small>{privacy.path(workspace.root)}</small></span>
+        </div>
         <div><strong>+{workspace.additions}</strong><em>−{workspace.deletions}</em></div>
         <button onClick={() => void onRefresh()} aria-label="Refresh session changes"><RefreshCw size={15} /></button>
       </header>
@@ -461,7 +479,7 @@ function Changes({
           {workspace.files.length ? workspace.files.map((file) => (
             <button className={selected === file.path ? 'is-active' : ''} onClick={() => void onOpen(file.path)} key={file.path}>
               <span>{file.status}</span>
-              <strong>{file.path}</strong>
+              <strong>{privacy.file(file.path)}</strong>
               <small><b>+{file.additions}</b><em>−{file.deletions}</em></small>
               <ChevronRight size={14} />
             </button>
@@ -470,8 +488,8 @@ function Changes({
         <section>
           {diff ? (
             <>
-              <header><span>{diff.path}</span>{diff.truncated && <em>TRUNCATED</em>}</header>
-              <pre>{diff.diff || 'No textual diff available.'}</pre>
+              <header><span>{privacy.file(diff.path)}</span>{diff.truncated && <em>TRUNCATED</em>}</header>
+              <pre>{privacy.enabled ? privacy.content(diff.diff) : diff.diff || 'No textual diff available.'}</pre>
             </>
           ) : (
             <div className="workbench-empty"><FileCode2 size={24} /><strong>Select a changed file</strong><p>Its bounded patch will appear here.</p></div>
@@ -483,17 +501,18 @@ function Changes({
 }
 
 function Details({ session, data }: { session: SessionRow | null; data: SessionWorkbenchData | null }) {
+  const privacy = usePrivacy()
   if (!session) return null
   const details = [
-    ['Session ID', session.id],
-    ['Workspace', session.cwd],
+    ['Session ID', privacy.identifier(session.id)],
+    ['Workspace', privacy.path(session.cwd)],
     ['Model', session.model],
-    ['Agent', session.agent],
+    ['Agent', privacy.capability(session.agent, 'Agent')],
     ['Reasoning', session.reasoningEffort],
     ['Sandbox', session.sandboxProfile],
     ['Created', new Date(session.createdAt).toLocaleString()],
     ['Updated', new Date(session.updatedAt).toLocaleString()],
-    ['Runtime source', data?.live ? `CLI PID ${data.live.pid}` : data?.managed ? 'Grok UI ACP' : 'Local archive'],
+    ['Runtime source', data?.live ? privacy.enabled ? 'CLI PID ••••' : `CLI PID ${data.live.pid}` : data?.managed ? 'Grok UI ACP' : 'Local archive'],
     ['Managed', data?.managed ? 'Yes — durable control record' : 'No — attach with a follow-up'],
     ['Archive state', session.archived ? 'Archived in Grok UI' : 'Active'],
     ['Disk footprint', `${compact(session.diskBytes)} bytes`],
@@ -502,7 +521,7 @@ function Details({ session, data }: { session: SessionRow | null; data: SessionW
     <div className="workbench-details">
       <section>
         <div className="detail-mark"><Clock3 size={21} /><span /></div>
-        <div><span>SESSION SUMMARY</span><p>{session.summary || 'No generated summary is available yet.'}</p></div>
+        <div><span>SESSION SUMMARY</span><p>{privacy.content(session.summary || 'No generated summary is available yet.')}</p></div>
       </section>
       <dl>
         {details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}

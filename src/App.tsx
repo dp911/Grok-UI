@@ -10,6 +10,7 @@ import {
   ChevronRight,
   CircleAlert,
   Command,
+  Copy,
   Database,
   FileCode2,
   FolderGit2,
@@ -47,6 +48,7 @@ import type {
 import { ChangesView } from './views/ChangesView'
 import { ControlView } from './views/ControlView'
 import { SessionWorkbench } from './views/SessionWorkbench'
+import { PrivacyProvider, usePrivacy } from './privacy'
 
 interface NavItem {
   id: ViewId
@@ -98,6 +100,14 @@ function storedTheme(): ThemeId {
   }
 }
 
+function storedPrivacy(): boolean {
+  try {
+    return localStorage.getItem('grok-ui-privacy') === 'on'
+  } catch {
+    return false
+  }
+}
+
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
 const integer = new Intl.NumberFormat('en-US')
 
@@ -145,6 +155,7 @@ function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [theme, setTheme] = useState<ThemeId>(storedTheme)
+  const [privacyMode, setPrivacyMode] = useState(storedPrivacy)
   const lastAttentionRef = useRef(0)
 
   useEffect(() => {
@@ -156,18 +167,30 @@ function App() {
     }
   }, [theme])
 
+  useEffect(() => {
+    document.documentElement.dataset.privacy = privacyMode ? 'on' : 'off'
+    try {
+      localStorage.setItem('grok-ui-privacy', privacyMode ? 'on' : 'off')
+    } catch {
+      // Privacy Mode still works when storage is unavailable.
+    }
+  }, [privacyMode])
+
   const load = useCallback(async (force = false) => {
     if (force) setRefreshing(true)
     try {
-      const [payload, livePayload, controlPayload] = await Promise.all([
+      const [payload, livePayload] = await Promise.all([
         getDashboard(force),
         getLiveSnapshot(),
-        getControlSnapshot(),
       ])
       setData(payload)
       setLive(livePayload)
-      setControl(controlPayload)
       setError('')
+      void getControlSnapshot()
+        .then(setControl)
+        .catch(() => {
+          // Dashboard and onboarding stay available if ACP is not ready yet.
+        })
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to read Grok data')
     } finally {
@@ -220,12 +243,14 @@ function App() {
     ) {
       const pending = control?.permissions.at(-1)
       new Notification('Grok needs your input', {
-        body: pending?.title || `${attention} session${attention === 1 ? '' : 's'} waiting for attention.`,
+        body: privacyMode
+          ? `${attention} session${attention === 1 ? '' : 's'} waiting for attention.`
+          : pending?.title || `${attention} session${attention === 1 ? '' : 's'} waiting for attention.`,
         tag: pending?.id || 'grok-ui-attention',
       })
     }
     lastAttentionRef.current = attention
-  }, [control?.permissions, live?.attentionCount])
+  }, [control?.permissions, live?.attentionCount, privacyMode])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -274,27 +299,30 @@ function App() {
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} />
 
   return (
-    <div className="app-shell" data-theme={theme}>
-      <AmbientGrid />
-      <Sidebar
-        active={view}
-        connected={streamConnected}
-        version={data?.version || '—'}
-        open={mobileNavOpen}
-        onNavigate={setActiveView}
-        onClose={() => setMobileNavOpen(false)}
-      />
-
-      <main className="main-stage">
-        <TopBar
+    <PrivacyProvider enabled={privacyMode}>
+      <div className="app-shell" data-theme={theme} data-privacy={privacyMode ? 'on' : 'off'}>
+        <AmbientGrid />
+        <Sidebar
           active={view}
           connected={streamConnected}
-          generatedAt={live?.generatedAt || data?.generatedAt}
-          refreshing={refreshing}
-          onMenu={() => setMobileNavOpen(true)}
-          onPalette={() => setPaletteOpen(true)}
-          onRefresh={() => void load(true)}
+          version={data?.version || '—'}
+          open={mobileNavOpen}
+          onNavigate={setActiveView}
+          onClose={() => setMobileNavOpen(false)}
         />
+
+        <main className="main-stage">
+          <TopBar
+            active={view}
+            connected={streamConnected}
+            generatedAt={live?.generatedAt || data?.generatedAt}
+            refreshing={refreshing}
+            privacyMode={privacyMode}
+            onMenu={() => setMobileNavOpen(true)}
+            onPalette={() => setPaletteOpen(true)}
+            onRefresh={() => void load(true)}
+            onTogglePrivacy={() => setPrivacyMode((enabled) => !enabled)}
+          />
 
         {loading ? (
           <LoadingState />
@@ -308,6 +336,7 @@ function App() {
                 data={data}
                 connected={streamConnected}
                 onOpenSession={openSession}
+                onRefresh={() => void load(true)}
               />
             )}
             {view === 'control' && (
@@ -351,34 +380,35 @@ function App() {
             {view === 'themes' && <ThemesView active={theme} onSelect={setTheme} />}
           </div>
         )}
-      </main>
+        </main>
 
-      <MobileNav active={view} onNavigate={setActiveView} />
-      {selectedSession && (
-        <SessionWorkbench
-          sessionId={selectedSession.id}
-          fallback={data?.sessions.find((item) => item.id === selectedSession.id) || selectedSession.fallback}
-          live={live}
-          control={control}
-          onClose={() => setSelectedSession(null)}
-          onUpdated={() => load(true)}
-        />
-      )}
-      {paletteOpen && (
-        <CommandPalette
-          data={data}
-          onClose={() => setPaletteOpen(false)}
-          onNavigate={(next) => {
-            setActiveView(next)
-            setPaletteOpen(false)
-          }}
-          onSession={(session) => {
-            openSession(session)
-            setPaletteOpen(false)
-          }}
-        />
-      )}
-    </div>
+        <MobileNav active={view} onNavigate={setActiveView} />
+        {selectedSession && (
+          <SessionWorkbench
+            sessionId={selectedSession.id}
+            fallback={data?.sessions.find((item) => item.id === selectedSession.id) || selectedSession.fallback}
+            live={live}
+            control={control}
+            onClose={() => setSelectedSession(null)}
+            onUpdated={() => load(true)}
+          />
+        )}
+        {paletteOpen && (
+          <CommandPalette
+            data={data}
+            onClose={() => setPaletteOpen(false)}
+            onNavigate={(next) => {
+              setActiveView(next)
+              setPaletteOpen(false)
+            }}
+            onSession={(session) => {
+              openSession(session)
+              setPaletteOpen(false)
+            }}
+          />
+        )}
+      </div>
+    </PrivacyProvider>
   )
 }
 
@@ -538,17 +568,21 @@ function TopBar({
   connected,
   generatedAt,
   refreshing,
+  privacyMode,
   onMenu,
   onPalette,
   onRefresh,
+  onTogglePrivacy,
 }: {
   active: ViewId
   connected: boolean
   generatedAt?: string
   refreshing: boolean
+  privacyMode: boolean
   onMenu: () => void
   onPalette: () => void
   onRefresh: () => void
+  onTogglePrivacy: () => void
 }) {
   const activeItem = NAV_ITEMS.find((item) => item.id === active)!
   return (
@@ -566,6 +600,16 @@ function TopBar({
           <span className="sync-copy">{connected ? 'Event stream' : 'Reconnecting'}</span>
           <span className="sync-time">{generatedAt ? timeAgo(generatedAt) : '—'}</span>
         </div>
+        <button
+          className={`privacy-toggle ${privacyMode ? 'is-active' : ''}`}
+          type="button"
+          aria-pressed={privacyMode}
+          onClick={onTogglePrivacy}
+          title={privacyMode ? 'Turn Privacy Mode off' : 'Hide local names, paths, and content'}
+        >
+          <ShieldCheck size={15} />
+          <span>{privacyMode ? 'Privacy on' : 'Privacy'}</span>
+        </button>
         <button className="command-trigger" onClick={onPalette}>
           <Search size={15} />
           <span>Jump anywhere</span>
@@ -584,12 +628,15 @@ function LiveView({
   data,
   connected,
   onOpenSession,
+  onRefresh,
 }: {
   live: LiveSnapshot | null
   data: DashboardPayload
   connected: boolean
   onOpenSession: (session: SessionRow | string) => void
+  onRefresh: () => void
 }) {
+  const privacy = usePrivacy()
   const [selectedId, setSelectedId] = useState(live?.agents[0]?.id || '')
   const feedRef = useRef<HTMLDivElement>(null)
   const agents = live?.agents || []
@@ -645,7 +692,9 @@ function LiveView({
         />
       </section>
 
-      {!selected ? (
+      {!selected && data.stats.sessions === 0 ? (
+        <FirstRunOnboarding connected={connected} dataReady={data.connected} onRefresh={onRefresh} />
+      ) : !selected ? (
         <section className="no-live-agent section-gap">
           <div className="idle-radar" aria-hidden="true"><span /><span /><i /></div>
           <div className="kicker">Runtime clear</div>
@@ -670,8 +719,8 @@ function LiveView({
                   <span className="agent-number">A{String(index + 1).padStart(2, '0')}</span>
                   <AgentStateGlyph state={agent.state} />
                   <span className="agent-roster-copy">
-                    <strong>{agent.title}</strong>
-                    <small>{agent.workspace} · PID {agent.pid}</small>
+                    <strong>{privacy.sessionTitle(agent.title, agent.id)}</strong>
+                    <small>{privacy.workspace(agent.cwd)} · {privacy.enabled ? 'PID ••••' : `PID ${agent.pid}`}</small>
                   </span>
                   <ChevronRight size={15} />
                 </button>
@@ -688,8 +737,8 @@ function LiveView({
               <div className="runtime-identity">
                 <AgentStateGlyph state={selected.state} />
                 <div>
-                  <span>{selected.workspace} / {selected.model}</span>
-                  <h2>{selected.title}</h2>
+                  <span>{privacy.workspace(selected.cwd)} / {selected.model}</span>
+                  <h2>{privacy.sessionTitle(selected.title, selected.id)}</h2>
                 </div>
               </div>
               <div className="runtime-actions">
@@ -716,14 +765,14 @@ function LiveView({
                   ? `${selected.costAmount.toFixed(3)} ${selected.costCurrency}`
                   : '—'}
               />
-              <RuntimeInstrument label="Process" value={`PID ${selected.pid}`} />
+              <RuntimeInstrument label="Process" value={privacy.enabled ? 'PID ••••' : `PID ${selected.pid}`} />
             </div>
 
             {selected.currentTool && (
               <div className="current-operation">
                 <span className="operation-pulse" />
                 <span>CURRENT OPERATION</span>
-                <strong>{selected.currentTool}</strong>
+                <strong>{privacy.content(selected.currentTool)}</strong>
               </div>
             )}
 
@@ -742,6 +791,87 @@ function LiveView({
         </section>
       )}
     </>
+  )
+}
+
+function FirstRunOnboarding({
+  connected,
+  dataReady,
+  onRefresh,
+}: {
+  connected: boolean
+  dataReady: boolean
+  onRefresh: () => void
+}) {
+  const [copied, setCopied] = useState('')
+  const copy = async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopied(command)
+      window.setTimeout(() => setCopied(''), 1_500)
+    } catch {
+      setCopied('')
+    }
+  }
+  const steps = [
+    {
+      index: '01',
+      label: 'Authenticate Grok',
+      copy: 'Run this once if the CLI has not been connected to your account.',
+      command: 'grok login',
+    },
+    {
+      index: '02',
+      label: 'Open a workspace',
+      copy: 'Change into a project, then start a normal Grok CLI session.',
+      command: 'grok',
+    },
+    {
+      index: '03',
+      label: 'Watch it register',
+      copy: 'Return here. The active agent and its live event stream will appear automatically.',
+      command: '',
+    },
+  ]
+  return (
+    <section className="first-run section-gap">
+      <div className="first-run-head">
+        <div>
+          <span className="kicker">FIRST CONTACT / READY</span>
+          <h2>Zero to live<br /><em>in three moves.</em></h2>
+        </div>
+        <div className="first-run-status">
+          <span className={dataReady ? 'is-ready' : ''}><i /> Local store</span>
+          <span className={connected ? 'is-ready' : ''}><i /> Event link</span>
+          <span><i /> First session</span>
+        </div>
+      </div>
+      <div className="first-run-steps">
+        {steps.map((step) => (
+          <article key={step.index}>
+            <span>{step.index}</span>
+            <div>
+              <h3>{step.label}</h3>
+              <p>{step.copy}</p>
+            </div>
+            {step.command ? (
+              <button type="button" onClick={() => void copy(step.command)}>
+                <code>{step.command}</code>
+                {copied === step.command ? <Check size={15} /> : <Copy size={15} />}
+              </button>
+            ) : (
+              <div className="first-run-radar" aria-hidden="true"><i /><i /></div>
+            )}
+          </article>
+        ))}
+      </div>
+      <footer>
+        <span>Need a local environment check? Run <code>npm run doctor</code>.</span>
+        <button className="text-button" onClick={onRefresh}>
+          Recheck setup <RefreshCw size={14} />
+        </button>
+      </footer>
+    </section>
   )
 }
 
@@ -789,6 +919,7 @@ function RuntimeInstrument({ label, value }: { label: string; value: string }) {
 }
 
 function LiveFeedRow({ item, index }: { item: LiveFeedItem; index: number }) {
+  const privacy = usePrivacy()
   const labels: Record<LiveFeedItem['type'], string> = {
     user: 'YOU',
     assistant: 'GROK',
@@ -804,11 +935,11 @@ function LiveFeedRow({ item, index }: { item: LiveFeedItem; index: number }) {
       <div className="feed-content">
         <header>
           <span>{labels[item.type]}</span>
-          <strong>{item.title}</strong>
+          <strong>{privacy.content(item.title)}</strong>
           {item.status && <em className={`tool-status status-${item.status}`}>{item.status}</em>}
           <time>{item.timestamp && item.timestamp !== new Date(0).toISOString() ? timeAgo(item.timestamp) : 'live'}</time>
         </header>
-        {item.text && <p>{item.text}</p>}
+        {item.text && <p>{privacy.content(item.text)}</p>}
       </div>
     </article>
   )
@@ -919,6 +1050,7 @@ function SystemCard({
   live: LiveSnapshot | null
   connected: boolean
 }) {
+  const privacy = usePrivacy()
   const health = data.stats.sessions === 0 ? 0 : Math.max(0, 100 - (data.stats.errors / Math.max(data.stats.turns, 1)) * 100)
   return (
     <article className="system-card panel-cut">
@@ -950,7 +1082,7 @@ function SystemCard({
           <span className={`status-dot ${connected ? 'is-live' : ''}`} />
           {connected ? 'EVENT STREAM LINKED' : 'EVENT STREAM RECONNECTING'}
         </span>
-        <span>{data.grokHome}</span>
+        <span>{privacy.path(data.grokHome)}</span>
       </div>
     </article>
   )
@@ -1052,6 +1184,7 @@ function ActivityChart({ days }: { days: ActivityDay[] }) {
 }
 
 function RankedBars({ data, empty }: { data: RankedDatum[]; empty: string }) {
+  const privacy = usePrivacy()
   const max = Math.max(1, ...data.map((item) => item.value))
   if (!data.length) return <EmptyInline>{empty}</EmptyInline>
   return (
@@ -1060,7 +1193,10 @@ function RankedBars({ data, empty }: { data: RankedDatum[]; empty: string }) {
         <div className="rank-row" key={item.name}>
           <span className="rank-number">{String(index + 1).padStart(2, '0')}</span>
           <div className="rank-main">
-            <div className="rank-copy"><strong>{item.name}</strong><span>{formatNumber(item.value)}</span></div>
+            <div className="rank-copy">
+              <strong>{privacy.capability(item.name, 'Signal')}</strong>
+              <span>{formatNumber(item.value)}</span>
+            </div>
             <div className="rank-track"><span style={{ width: `${(item.value / max) * 100}%` }} /></div>
           </div>
         </div>
@@ -1070,6 +1206,7 @@ function RankedBars({ data, empty }: { data: RankedDatum[]; empty: string }) {
 }
 
 function SessionList({ sessions, onOpen }: { sessions: SessionRow[]; onOpen: (session: SessionRow) => void }) {
+  const privacy = usePrivacy()
   if (!sessions.length) return <EmptyInline>No Grok sessions have been indexed yet.</EmptyInline>
   return (
     <div className="session-list">
@@ -1077,8 +1214,8 @@ function SessionList({ sessions, onOpen }: { sessions: SessionRow[]; onOpen: (se
         <button className="session-row" key={session.id} onClick={() => onOpen(session)}>
           <StatusGlyph status={session.status} />
           <div className="session-copy">
-            <strong>{session.title}</strong>
-            <span>{session.workspace} / {session.model}</span>
+            <strong>{privacy.sessionTitle(session.title, session.id)}</strong>
+            <span>{privacy.workspace(session.cwd)} / {session.model}</span>
           </div>
           <div className="session-metrics">
             <span>{formatNumber(session.toolCalls)} tools</span>
@@ -1101,6 +1238,7 @@ function StatusGlyph({ status }: { status: SessionRow['status'] }) {
 }
 
 function ModelMix({ data }: { data: RankedDatum[] }) {
+  const privacy = usePrivacy()
   const total = data.reduce((sum, item) => sum + item.value, 0)
   if (!data.length) return <EmptyInline>No model usage recorded.</EmptyInline>
   return (
@@ -1118,7 +1256,7 @@ function ModelMix({ data }: { data: RankedDatum[] }) {
         {data.slice(0, 4).map((item, index) => (
           <div key={item.name}>
             <i className={`model-dot segment-${index}`} />
-            <span>{item.name}</span>
+            <span>{privacy.capability(item.name, 'Model')}</span>
             <strong>{Math.round((item.value / total) * 100)}%</strong>
           </div>
         ))}
@@ -1128,6 +1266,7 @@ function ModelMix({ data }: { data: RankedDatum[] }) {
 }
 
 function WorkspaceList({ data }: { data: RankedDatum[] }) {
+  const privacy = usePrivacy()
   if (!data.length) return <EmptyInline>No workspace metadata available.</EmptyInline>
   return (
     <div className="workspace-list">
@@ -1135,7 +1274,7 @@ function WorkspaceList({ data }: { data: RankedDatum[] }) {
         <div key={item.name}>
           <span className="workspace-index">W{String(index + 1).padStart(2, '0')}</span>
           <FolderGit2 size={15} />
-          <strong>{item.name}</strong>
+          <strong>{privacy.workspace(item.name)}</strong>
           <span>{item.value} session{item.value === 1 ? '' : 's'}</span>
         </div>
       ))}
@@ -1156,6 +1295,7 @@ function SessionsView({
   onQuery: (value: string) => void
   onOpenSession: (session: SessionRow) => void
 }) {
+  const privacy = usePrivacy()
   const [archiveScope, setArchiveScope] = useState<'active' | 'archived'>('active')
   const sessions = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -1197,8 +1337,11 @@ function SessionsView({
           return (
             <button className="session-table session-table-row" key={session.id} onClick={() => onOpenSession(session)}>
               <span><StatusGlyph status={status} /><small>{status}</small></span>
-              <span className="table-title"><strong>{session.title}</strong><small>{session.id.slice(0, 13)}</small></span>
-              <span>{session.workspace}</span>
+              <span className="table-title">
+                <strong>{privacy.sessionTitle(session.title, session.id)}</strong>
+                <small>{privacy.identifier(session.id)}</small>
+              </span>
+              <span>{privacy.workspace(session.cwd)}</span>
               <span className="model-pill">{session.model}</span>
               <span>{formatNumber(session.turns)}</span>
               <span>{formatNumber(session.toolCalls)}</span>
@@ -1312,6 +1455,7 @@ function LibraryView({
   query: string
   onQuery: (value: string) => void
 }) {
+  const privacy = usePrivacy()
   const filtered = data.library.filter((item) => item.name.toLowerCase().includes(query.trim().toLowerCase()))
   const groups = [
     { kind: 'skill' as const, label: 'Skills', icon: Sparkles, copy: 'Reusable instruction packages available to Grok.' },
@@ -1341,7 +1485,7 @@ function LibraryView({
                 {items.length ? items.map((item) => (
                   <div key={`${item.kind}:${item.name}`}>
                     <span className="capability-icon">{item.kind === 'skill' ? 'S' : item.kind === 'agent' ? 'A' : 'P'}</span>
-                    <strong>{item.name}</strong>
+                    <strong>{privacy.capability(item.name, group.label.slice(0, -1))}</strong>
                     <span className={`source-tag source-${item.source}`}>{item.source}</span>
                   </div>
                 )) : <EmptyInline>No matching {group.label.toLowerCase()}.</EmptyInline>}
@@ -1355,6 +1499,7 @@ function LibraryView({
 }
 
 function MemoryView({ data }: { data: DashboardPayload }) {
+  const privacy = usePrivacy()
   const scopes = ['global', 'workspace', 'session']
   return (
     <>
@@ -1382,7 +1527,7 @@ function MemoryView({ data }: { data: DashboardPayload }) {
                 {items.length ? items.map((item) => (
                   <div key={item.name}>
                     <Archive size={15} />
-                    <span><strong>{item.name}</strong><small>{timeAgo(item.updatedAt)}</small></span>
+                    <span><strong>{privacy.memory(item.name)}</strong><small>{timeAgo(item.updatedAt)}</small></span>
                     <em>{formatBytes(item.bytes)}</em>
                   </div>
                 )) : <EmptyInline>No {scope} memory files found.</EmptyInline>}
@@ -1441,6 +1586,7 @@ function CommandPalette({
   onNavigate: (view: ViewId) => void
   onSession: (session: SessionRow) => void
 }) {
+  const privacy = usePrivacy()
   const [value, setValue] = useState('')
   const normalized = value.toLowerCase()
   const navResults = NAV_ITEMS.filter((item) => item.label.toLowerCase().includes(normalized))
@@ -1471,7 +1617,12 @@ function CommandPalette({
           {sessionResults.length > 0 && <div className="palette-label">Recent sessions</div>}
           {sessionResults.map((session) => (
             <button key={session.id} onClick={() => onSession(session)}>
-              <TerminalSquare size={16} /><span><strong>{session.title}</strong><small>{session.workspace} · {session.model}</small></span><ChevronRight size={15} />
+              <TerminalSquare size={16} />
+              <span>
+                <strong>{privacy.sessionTitle(session.title, session.id)}</strong>
+                <small>{privacy.workspace(session.cwd)} · {session.model}</small>
+              </span>
+              <ChevronRight size={15} />
             </button>
           ))}
           {!navResults.length && !sessionResults.length && <EmptyInline>No matching destination.</EmptyInline>}

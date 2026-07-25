@@ -16,7 +16,10 @@
   "scripts": {
     "dev": "concurrently -k -n api,ui -c green,cyan \"tsx watch server/index.ts\" \"vite\"",
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
-    "start": "node dist-server/index.js",
+    "start": "node scripts/start.mjs",
+    "serve": "node dist-server/index.js",
+    "doctor": "node scripts/doctor.mjs",
+    "setup": "npm run doctor && npm run build",
     "check": "tsc -b --pretty false && tsc -p tsconfig.server.json --pretty false",
     "test": "vitest run",
     "verify": "npm run check && npm test && npm run build"
