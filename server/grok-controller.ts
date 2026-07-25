@@ -15,6 +15,7 @@ import type {
   LiveFeedItem,
 } from './types.js'
 import { SessionStateStore } from './session-state.js'
+import { APP_VERSION } from './app-version.js'
 
 interface NewControlSession {
   cwd: string
@@ -349,7 +350,7 @@ export class GrokController extends EventEmitter {
         clientInfo: {
           name: 'grok-ui',
           title: 'Grok UI',
-          version: '0.4.1',
+          version: APP_VERSION,
         },
       })
       this.agentName = initialized.agentInfo?.title || initialized.agentInfo?.name || 'Grok'

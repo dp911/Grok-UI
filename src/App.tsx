@@ -32,7 +32,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getAuthStatus, getControlSnapshot, getDashboard, getLiveSnapshot, login } from './api'
+import { getAuthStatus, getControlSnapshot, getDashboard, getLiveSnapshot, getSetupStatus, login } from './api'
 import type {
   ActivityDay,
   ControlSnapshot,
@@ -42,6 +42,8 @@ import type {
   LiveSnapshot,
   RankedDatum,
   SessionRow,
+  SetupCheckState,
+  SetupStatus,
   ViewId,
   WorkspaceChangeEvent,
 } from './types'
@@ -49,6 +51,7 @@ import { ChangesView } from './views/ChangesView'
 import { ControlView } from './views/ControlView'
 import { SessionWorkbench } from './views/SessionWorkbench'
 import { PrivacyProvider, usePrivacy } from './privacy'
+import packageJson from '../package.json'
 
 interface NavItem {
   id: ViewId
@@ -145,6 +148,7 @@ function App() {
   const [data, setData] = useState<DashboardPayload | null>(null)
   const [live, setLive] = useState<LiveSnapshot | null>(null)
   const [control, setControl] = useState<ControlSnapshot | null>(null)
+  const [setup, setSetup] = useState<SetupStatus | null>(null)
   const [streamConnected, setStreamConnected] = useState(false)
   const [workspaceChange, setWorkspaceChange] = useState<WorkspaceChangeEvent | null>(null)
   const [loading, setLoading] = useState(true)
@@ -186,6 +190,13 @@ function App() {
       setData(payload)
       setLive(livePayload)
       setError('')
+      if (payload.stats.sessions === 0) {
+        void getSetupStatus(force)
+          .then(setSetup)
+          .catch(() => setSetup(null))
+      } else {
+        setSetup(null)
+      }
       void getControlSnapshot()
         .then(setControl)
         .catch(() => {
@@ -334,6 +345,7 @@ function App() {
               <LiveView
                 live={live}
                 data={data}
+                setup={setup}
                 connected={streamConnected}
                 onOpenSession={openSession}
                 onRefresh={() => void load(true)}
@@ -555,7 +567,7 @@ function Sidebar({
           </div>
         </div>
         <div className="sidebar-foot">
-          <span>UI / 0.4.1</span>
+          <span>UI / {packageJson.version}</span>
           <span>ACP CONTROL</span>
         </div>
       </aside>
@@ -626,12 +638,14 @@ function TopBar({
 function LiveView({
   live,
   data,
+  setup,
   connected,
   onOpenSession,
   onRefresh,
 }: {
   live: LiveSnapshot | null
   data: DashboardPayload
+  setup: SetupStatus | null
   connected: boolean
   onOpenSession: (session: SessionRow | string) => void
   onRefresh: () => void
@@ -693,7 +707,7 @@ function LiveView({
       </section>
 
       {!selected && data.stats.sessions === 0 ? (
-        <FirstRunOnboarding connected={connected} dataReady={data.connected} onRefresh={onRefresh} />
+        <FirstRunOnboarding connected={connected} setup={setup} onRefresh={onRefresh} />
       ) : !selected ? (
         <section className="no-live-agent section-gap">
           <div className="idle-radar" aria-hidden="true"><span /><span /><i /></div>
@@ -796,11 +810,11 @@ function LiveView({
 
 function FirstRunOnboarding({
   connected,
-  dataReady,
+  setup,
   onRefresh,
 }: {
   connected: boolean
-  dataReady: boolean
+  setup: SetupStatus | null
   onRefresh: () => void
 }) {
   const [copied, setCopied] = useState('')
@@ -813,60 +827,85 @@ function FirstRunOnboarding({
       setCopied('')
     }
   }
-  const steps = [
+  const cli = setup?.checks.find((check) => check.id === 'cli')
+  const auth = setup?.checks.find((check) => check.id === 'auth')
+  const state = setup?.checks.find((check) => check.id === 'state')
+  const steps: Array<{
+    index: string
+    label: string
+    copy: string
+    command: string
+    state: SetupCheckState | 'checking'
+  }> = [
     {
       index: '01',
-      label: 'Authenticate Grok',
-      copy: 'Run this once if the CLI has not been connected to your account.',
-      command: 'grok login',
+      label: 'Verify the CLI',
+      copy: cli?.detail || 'Checking whether Grok Build is installed and executable…',
+      command: 'grok version',
+      state: cli?.state || 'checking',
     },
     {
       index: '02',
-      label: 'Open a workspace',
-      copy: 'Change into a project, then start a normal Grok CLI session.',
-      command: 'grok',
+      label: 'Connect your account',
+      copy: auth?.detail || 'Checking whether the CLI can access your Grok models…',
+      command: 'grok login',
+      state: auth?.state || 'checking',
     },
     {
       index: '03',
-      label: 'Watch it register',
-      copy: 'Return here. The active agent and its live event stream will appear automatically.',
-      command: '',
+      label: 'Start the first session',
+      copy: state?.state === 'ready'
+        ? 'Open any project and run Grok. The live agent will register here automatically.'
+        : state?.detail || 'Open any project and start a normal Grok CLI session.',
+      command: 'grok',
+      state: 'action',
     },
   ]
   return (
     <section className="first-run section-gap">
       <div className="first-run-head">
         <div>
-          <span className="kicker">FIRST CONTACT / READY</span>
+          <span className="kicker">
+            {setup?.ready
+              ? 'FIRST CONTACT / READY'
+              : setup ? 'FIRST CONTACT / SETUP REQUIRED' : 'FIRST CONTACT / CHECKING'}
+          </span>
           <h2>Zero to live<br /><em>in three moves.</em></h2>
         </div>
         <div className="first-run-status">
-          <span className={dataReady ? 'is-ready' : ''}><i /> Local store</span>
-          <span className={connected ? 'is-ready' : ''}><i /> Event link</span>
+          <span className={cli?.state === 'ready' ? 'is-ready' : 'needs-action'}><i /> Grok CLI</span>
+          <span className={auth?.state === 'ready' ? 'is-ready' : 'needs-action'}><i /> Account</span>
           <span><i /> First session</span>
         </div>
       </div>
       <div className="first-run-steps">
         {steps.map((step) => (
-          <article key={step.index}>
+          <article className={`setup-${step.state}`} key={step.index}>
             <span>{step.index}</span>
             <div>
+              <small className={`setup-state setup-state-${step.state}`}>
+                {step.state === 'ready'
+                  ? <><Check size={11} /> Ready</>
+                  : step.state === 'action'
+                    ? <><CircleAlert size={11} /> Action needed</>
+                    : <><TimerReset size={11} /> Checking</>}
+              </small>
               <h3>{step.label}</h3>
               <p>{step.copy}</p>
             </div>
-            {step.command ? (
-              <button type="button" onClick={() => void copy(step.command)}>
-                <code>{step.command}</code>
-                {copied === step.command ? <Check size={15} /> : <Copy size={15} />}
-              </button>
-            ) : (
-              <div className="first-run-radar" aria-hidden="true"><i /><i /></div>
-            )}
+            <button type="button" onClick={() => void copy(step.command)}>
+              <code>{step.command}</code>
+              {copied === step.command ? <Check size={15} /> : <Copy size={15} />}
+            </button>
           </article>
         ))}
       </div>
       <footer>
-        <span>Need a local environment check? Run <code>npm run doctor</code>.</span>
+        <span>
+          {setup?.ready && connected
+            ? <>Environment ready. Start <code>grok</code> in any project.</>
+            : <>Need the full terminal report? Run <code>grok-ui doctor</code>.</>}
+        </span>
         <button className="text-button" onClick={onRefresh}>
           Recheck setup <RefreshCw size={14} />
         </button>

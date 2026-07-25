@@ -5,6 +5,7 @@ import type {
   SessionRow,
   SessionWorkbenchData,
   LiveSnapshot,
+  SetupStatus,
   WorkspaceDiff,
   WorkspaceSnapshot,
 } from './types'
@@ -25,6 +26,15 @@ export async function getDashboard(force = false): Promise<DashboardPayload> {
 export async function getLiveSnapshot(): Promise<LiveSnapshot> {
   const response = await fetch('/api/live', { headers: { Accept: 'application/json' } })
   return json<LiveSnapshot>(response, 'Live runtime request failed')
+}
+
+export async function getSetupStatus(force = false): Promise<SetupStatus> {
+  return json(
+    await fetch(`/api/setup${force ? '?refresh=1' : ''}`, {
+      headers: { Accept: 'application/json' },
+    }),
+    'Setup diagnostics request failed',
+  )
 }
 
 export async function getAuthStatus(): Promise<{ required: boolean; authenticated: boolean }> {

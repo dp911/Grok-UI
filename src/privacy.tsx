@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 
-interface PrivacyTools {
+export interface PrivacyTools {
   enabled: boolean
   sessionTitle: (value: string, id?: string) => string
   workspace: (value: string) => string
@@ -35,8 +35,9 @@ function alias(value: string): string {
   return (hash >>> 0).toString(36).slice(-3).toUpperCase().padStart(3, '0')
 }
 
-export function PrivacyProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
-  const tools = useMemo<PrivacyTools>(() => enabled ? {
+export function createPrivacyTools(enabled: boolean): PrivacyTools {
+  if (!enabled) return passthrough
+  return {
     enabled: true,
     sessionTitle: (value, id) => `Session ${alias(id || value)}`,
     workspace: (value) => `Workspace ${alias(value)}`,
@@ -46,7 +47,11 @@ export function PrivacyProvider({ enabled, children }: { enabled: boolean; child
     file: (value) => `file-${alias(value).toLowerCase()}`,
     capability: (value, kind = 'Capability') => `${kind} ${alias(value)}`,
     memory: (value) => `Memory ${alias(value)}`,
-  } : passthrough, [enabled])
+  }
+}
+
+export function PrivacyProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const tools = useMemo<PrivacyTools>(() => createPrivacyTools(enabled), [enabled])
 
   return <PrivacyContext.Provider value={tools}>{children}</PrivacyContext.Provider>
 }

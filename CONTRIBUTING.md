@@ -8,6 +8,7 @@ Thanks for helping improve Grok UI.
 2. Run `npm install`.
 3. Run `npm run dev`.
 4. Before submitting a change, run `npm run verify`.
+5. For packaging or startup changes, also run `npm run test:package`.
 
 Keep the server loopback-only during development. Tests must not depend on real Grok credentials or make model requests.
 
@@ -17,6 +18,7 @@ Keep the server loopback-only during development. Tests must not depend on real 
 - Add tests for parsing, permissions, path validation, and security boundaries.
 - Include desktop and mobile verification for UI changes.
 - Never commit `.env`, `~/.grok` data, session transcripts, credentials, or screenshots containing private source or prompts.
+- Keep package contents under the release-check size and privacy limits.
 
 ## Design principles
 
@@ -25,3 +27,5 @@ Keep the server loopback-only during development. Tests must not depend on real 
 - Keep live reads bounded.
 - Make offline, empty, and failure states understandable.
 - Maintain the black-box flight-recorder visual language.
+
+See [docs/releasing.md](docs/releasing.md) for the tagged release process.

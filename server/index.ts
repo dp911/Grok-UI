@@ -9,6 +9,8 @@ import { WorkspaceInspector } from './workspace-inspector.js'
 import { SessionStateStore } from './session-state.js'
 import { mergeSessionFeed, SessionReader } from './session-reader.js'
 import type { ControlSession, LiveAgent, SessionRow } from './types.js'
+import { APP_VERSION } from './app-version.js'
+import { inspectSetup } from './setup-diagnostics.js'
 
 const app = express()
 const sessionState = new SessionStateStore()
@@ -41,6 +43,7 @@ app.use(security.headers)
 app.get('/api/health', async (_request, response) => {
   response.json({
     ok: true,
+    version: APP_VERSION,
     authRequired: security.authRequired,
     generatedAt: new Date().toISOString(),
   })
@@ -60,6 +63,22 @@ app.get('/api/dashboard', async (request, response, next) => {
 
 app.get('/api/live', (_request, response) => {
   response.json(liveMonitor.snapshot())
+})
+
+let setupCache: { expiresAt: number; payload: Awaited<ReturnType<typeof inspectSetup>> } | null = null
+app.get('/api/setup', async (request, response, next) => {
+  try {
+    const force = request.query.refresh === '1'
+    if (force || !setupCache || setupCache.expiresAt < Date.now()) {
+      setupCache = {
+        expiresAt: Date.now() + 30_000,
+        payload: await inspectSetup({ grokHome: store.grokHome }),
+      }
+    }
+    response.json(setupCache.payload)
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.get('/api/control', (_request, response) => {
@@ -340,11 +359,20 @@ app.use((
 
 await liveMonitor.start()
 
-const server = app.listen(port, host, () => {
-  console.log(`Grok UI → http://${host}:${port}`)
-  console.log(`Reading local state from ${store.grokHome}`)
-  console.log(`Remote authentication ${security.authRequired ? 'enabled' : 'not required on loopback'}`)
+export const server = await new Promise<ReturnType<typeof app.listen>>((resolve, reject) => {
+  const listener = app.listen(port, host, () => resolve(listener))
+  listener.once('error', reject)
 })
+const address = server.address()
+const activePort = typeof address === 'object' && address ? address.port : port
+const displayHost = host === '127.0.0.1' || host === '::1'
+  ? 'localhost'
+  : host.includes(':') ? `[${host}]` : host
+export const serverUrl = `http://${displayHost}:${activePort}`
+
+console.log(`Grok UI → ${serverUrl}`)
+console.log('Local Grok state linked')
+console.log(`Remote authentication ${security.authRequired ? 'enabled' : 'not required on loopback'}`)
 
 async function shutdown() {
   server.close()

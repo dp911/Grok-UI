@@ -84,6 +84,23 @@ export interface DashboardPayload {
   memory: MemoryItem[]
 }
 
+export type SetupCheckId = 'node' | 'cli' | 'auth' | 'state'
+export type SetupCheckState = 'ready' | 'action'
+
+export interface SetupCheck {
+  id: SetupCheckId
+  label: string
+  state: SetupCheckState
+  detail: string
+  command: string
+}
+
+export interface SetupStatus {
+  generatedAt: string
+  ready: boolean
+  checks: SetupCheck[]
+}
+
 export type LiveAgentState = 'working' | 'waiting' | 'idle' | 'attention'
 export type LiveFeedType = 'user' | 'assistant' | 'thought' | 'tool' | 'plan' | 'system'
 

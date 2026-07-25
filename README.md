@@ -86,38 +86,51 @@ authenticated API routes. Grok credentials never enter the browser.
 
 - Node.js 22 or newer
 - A working [`grok`](https://github.com/xai-org/grok-build) installation
-- Grok Build already authenticated with `grok login`
+- Grok Build account access
 
-Verify the CLI:
+### One-command launch
+
+The packaged release checks its environment, starts the local server, and opens
+the dashboard:
 
 ```bash
-grok version
-grok models
+npx --yes grok-ui
 ```
 
-Then run Grok UI:
+Run diagnostics without starting the dashboard:
+
+```bash
+npx --yes grok-ui doctor
+```
+
+### Run from source
 
 ```bash
 git clone <repository-url>
 cd Grok-UI
-npm install
+npm ci
 npm run doctor
-npm run dev
-```
-
-Development mode starts the API and Vite dev server together. Open the
-localhost URL printed in the terminal.
-
-For the production server:
-
-```bash
 npm start
 ```
 
-`npm start` creates the production build automatically on a fresh clone.
-Run `npm run doctor` at any time to check Node, the Grok CLI, authentication,
-and local state without exposing machine-specific paths. A new installation
-opens with a three-step first-session guide instead of an empty dashboard.
+`npm start` creates the production build automatically when it is missing.
+For file-watching development, use `npm run dev`.
+
+The first launch opens a live setup diagnostic that distinguishes a missing
+CLI, an unauthenticated account, and a profile that simply has not created its
+first session yet. Machine-specific paths are never included in those checks.
+
+### CLI options
+
+| Option | Purpose |
+| --- | --- |
+| `doctor` | Check Node, Grok CLI, authentication, and local state |
+| `--port <number>` | Override port `4310` |
+| `--host <address>` | Override the loopback bind address |
+| `--grok-home <path>` | Use a specific Grok state directory |
+| `--state-dir <path>` | Use a specific private Grok UI state directory |
+| `--no-open` | Start without opening a browser |
+| `--version` | Print the installed Grok UI version |
 
 ## Live runtime
 
@@ -159,6 +172,8 @@ Theme selection stays in local browser storage and never changes session data.
 - Grok credentials never pass through the browser.
 - Persistent Privacy Mode replaces visible session names, paths, identifiers,
   event content, and file names with stable presentation-safe aliases.
+- Privacy Mode protects recordings and screen shares; it is not an access-control
+  boundary. Authorized browser clients can still receive the underlying local data.
 - Authentication cookies are `HttpOnly` and `SameSite=Strict`.
 - API responses are non-cacheable and include restrictive security headers.
 - Raw system prompts and durable-memory bodies are not indexed.
@@ -199,6 +214,8 @@ npm run check     # Type-check client and server
 npm test          # Run unit and integration tests
 npm run build     # Produce client and server builds
 npm run verify    # Check, test, and build
+npm run release:check # Audit the exact package contents
+npm run test:package  # Install and launch the packed artifact in isolation
 npm start         # Build when needed, then serve the production app
 npm run serve     # Serve an existing production build without rebuilding
 ```
@@ -229,8 +246,9 @@ The longer design and trust-boundary notes live in
 
 Grok UI is a release-candidate community project. Its monitor, control,
 workbench, and Git inspection paths are functional and covered by automated
-tests. Grok Build and ACP evolve quickly, so compatibility fixes may be needed
-for future releases.
+tests. The distributable package is also installed and launched in isolation
+on macOS and Linux CI before release. Grok Build and ACP evolve quickly, so
+compatibility fixes may be needed for future releases.
 
 ## License
 

@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible Grok UI problem without sharing private session data.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Remove names, prompts, paths, tokens, source code, and public IP addresses before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Grok UI version
+      description: Run `grok-ui --version` or read the sidebar footer.
+      placeholder: 0.5.0
+    validations:
+      required: true
+  - type: input
+    id: grok-version
+    attributes:
+      label: Grok CLI version
+      description: Run `grok version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the shortest sanitized sequence that triggers the problem.
+      placeholder: |
+        1. Start Grok UI with…
+        2. Open…
+        3. Observe…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste `grok-ui doctor` output only after checking that it contains no private additions.
+      render: shell
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed credentials, prompts, source code, personal names, private paths, and IP addresses.
+          required: true

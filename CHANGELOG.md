@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-07-24
+
+- Added the installable `grok-ui` executable with browser auto-open, help,
+  version, port, host, state-directory, and no-open options.
+- Added `grok-ui doctor` and safe in-dashboard setup diagnostics for Node,
+  Grok CLI availability, authentication, and first-session state.
+- Added a persistent presentation Privacy Mode across runtime, archives,
+  workbenches, changes, notifications, and search inputs.
+- Added artifact content validation and an isolated packed-package smoke test.
+- Added Node 22/24 CI, macOS/Linux package verification, tagged GitHub release
+  artifacts, structured issue forms, and a pull-request privacy checklist.
+- Prevented ACP startup from blocking the read-only dashboard and first-run
+  onboarding.
+
 ## 0.4.1 — 2026-07-24
 
 - Replaced the placeholder sidebar glyph with a clean Grok symbol derived from the supplied artwork.

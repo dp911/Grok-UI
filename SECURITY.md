@@ -23,3 +23,8 @@ Include the affected version, deployment topology, reproduction steps, and impac
 ## Trust boundary
 
 The browser never receives Grok credentials. The server owns the local ACP connection and passes explicit permission decisions back to Grok. A valid Grok UI token grants access to that control surface, so it must be protected like a developer credential.
+
+Privacy Mode is a presentation safeguard for recordings, demos, and screen
+sharing. It replaces sensitive values in rendered views but does not redact API
+responses or remove operational values from browser memory. Do not treat Privacy
+Mode as a substitute for authentication or trusted-device access.

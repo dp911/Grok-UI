@@ -3,8 +3,11 @@ dist/
 dist-server/
 .DS_Store
 *.log
+*.tgz
+*.auth-state.json
 .env
 .env.local
 .env.*.local
 coverage/
+test-results/
 .grok-ui/
