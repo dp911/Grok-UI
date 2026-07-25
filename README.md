@@ -106,7 +106,7 @@ npx --yes grok-ui doctor
 ### Run from source
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/joeynyc/Grok-UI.git
 cd Grok-UI
 npm ci
 npm run doctor
@@ -212,6 +212,7 @@ npm run doctor    # Check Node, Grok CLI, authentication, and local state
 npm run setup     # Run preflight checks and create a production build
 npm run check     # Type-check client and server
 npm test          # Run unit and integration tests
+npm run test:e2e  # Run production browser onboarding and control tests
 npm run build     # Produce client and server builds
 npm run verify    # Check, test, and build
 npm run release:check # Audit the exact package contents

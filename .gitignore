@@ -10,4 +10,5 @@ dist-server/
 .env.*.local
 coverage/
 test-results/
+playwright-report/
 .grok-ui/

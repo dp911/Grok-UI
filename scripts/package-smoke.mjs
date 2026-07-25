@@ -12,6 +12,8 @@ const packDirectory = path.join(temporaryRoot, 'pack')
 const installDirectory = path.join(temporaryRoot, 'install')
 const grokHome = path.join(temporaryRoot, 'grok-home')
 const stateDirectory = path.join(temporaryRoot, 'state')
+const fakeGrok = path.join(temporaryRoot, 'grok')
+const readyMarker = path.join(grokHome, 'package-cli-ready')
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
 function run(command, args, cwd) {
@@ -68,6 +70,16 @@ try {
     fs.mkdir(stateDirectory),
   ])
   await fs.writeFile(path.join(installDirectory, 'package.json'), '{"private":true,"type":"module"}\n')
+  await fs.writeFile(fakeGrok, `#!/usr/bin/env node
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+const marker = path.join(process.env.GROK_HOME || '', 'package-cli-ready')
+if (!existsSync(marker)) process.exit(1)
+if (process.argv[2] === 'version') console.log('Grok Build package-smoke')
+else if (process.argv[2] === 'models') console.log('grok-package-smoke')
+else process.exit(1)
+`)
+  await fs.chmod(fakeGrok, 0o755)
 
   const packOutput = run(
     npm,
@@ -123,7 +135,7 @@ try {
     '--state-dir', stateDirectory,
   ], {
     cwd: installDirectory,
-    env: { ...process.env, GROK_BIN: 'grok-ui-smoke-missing-cli' },
+    env: { ...process.env, GROK_BIN: fakeGrok },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   child.stdout.on('data', (chunk) => output.push(chunk.toString()))
@@ -150,6 +162,36 @@ try {
   ) {
     throw new Error(`unexpected setup diagnostics: ${JSON.stringify(setup)}`)
   }
+  await fs.writeFile(readyMarker, 'ready\n')
+  const readyResponse = await fetch(`http://127.0.0.1:${port}/api/setup?refresh=1`)
+  const readySetup = await readyResponse.json()
+  if (
+    !readyResponse.ok
+    || !readySetup.ready
+    || readySetup.checks?.some((check) => check.id !== 'state' && check.state !== 'ready')
+  ) {
+    throw new Error(`packaged onboarding did not reach ready: ${JSON.stringify(readySetup)}`)
+  }
+
+  const liveSessionId = 'package-smoke-live'
+  const openedAt = new Date().toISOString()
+  await fs.writeFile(path.join(grokHome, 'active_sessions.json'), JSON.stringify([{
+    session_id: liveSessionId,
+    pid: process.pid,
+    cwd: installDirectory,
+    opened_at: openedAt,
+  }]))
+  const liveDeadline = Date.now() + 8_000
+  let live
+  while (Date.now() < liveDeadline) {
+    const response = await fetch(`http://127.0.0.1:${port}/api/live`)
+    live = await response.json()
+    if (live.activeCount === 1 && live.agents?.[0]?.id === liveSessionId) break
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  if (live?.activeCount !== 1 || live.agents?.[0]?.id !== liveSessionId) {
+    throw new Error(`packaged server did not discover a newly registered session: ${JSON.stringify(live)}`)
+  }
 
   console.log('\nGROK UI / PACKAGE SMOKE\n')
   console.log(`✓ Packed artifact     ${packed.filename}`)
@@ -159,6 +201,8 @@ try {
   console.log(`✓ Production server   health check passed on ${process.platform}`)
   console.log(`✓ Browser security    CSP and frame protection headers confirmed`)
   console.log(`✓ First-run failure   missing CLI returned actionable diagnostics`)
+  console.log(`✓ First-run ready     CLI and account checks transitioned to ready`)
+  console.log(`✓ Live registration   new CLI session discovered by the packaged server`)
 } finally {
   if (child && child.exitCode === null) {
     child.kill('SIGTERM')
