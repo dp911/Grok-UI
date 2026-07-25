@@ -3653,6 +3653,8 @@ kbd {
 
 .lane-card.state-failed::before { background: var(--coral); }
 .lane-card.state-attention::before { background: var(--amber); box-shadow: 0 0 14px rgba(255,202,87,.35); }
+.lane-card.state-stopping::before { background: var(--amber); box-shadow: 0 0 14px rgba(255,202,87,.35); }
+.lane-card.state-cancelled::before { background: var(--lime); box-shadow: 0 0 12px rgba(217,255,67,.25); }
 .lane-card.is-selected { border-color: rgba(217,255,67,.3); }
 .lane-index { color: #5c6057; font-size: 8px; }
 
@@ -3675,7 +3677,9 @@ kbd {
 
 .state-working .lane-state,
 .state-starting .lane-state { color: var(--lime); }
-.state-attention .lane-state { color: var(--amber); }
+.state-attention .lane-state,
+.state-stopping .lane-state { color: var(--amber); }
+.state-cancelled .lane-state { color: var(--lime); }
 
 .state-working .lane-state i,
 .state-starting .lane-state i {
@@ -3687,6 +3691,17 @@ kbd {
 .state-attention .lane-state i {
   background: var(--amber);
   box-shadow: 0 0 8px rgba(255,202,87,.65);
+}
+
+.state-stopping .lane-state i {
+  background: var(--amber);
+  box-shadow: 0 0 8px rgba(255,202,87,.65);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.state-cancelled .lane-state i {
+  background: var(--lime);
+  box-shadow: 0 0 8px rgba(217,255,67,.45);
 }
 
 .lane-main h3 {
@@ -3748,9 +3763,63 @@ kbd {
   cursor: pointer;
 }
 
+.stop-lane:disabled {
+  cursor: wait;
+  opacity: .7;
+}
+
+.resume-lane {
+  min-height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--lime);
+  border: 1px solid rgba(217,255,67,.25);
+  background: rgba(217,255,67,.06);
+  font-size: 8px;
+  cursor: pointer;
+}
+
 .lane-actions {
   display: grid;
   gap: 6px;
+}
+
+.lane-cancellation {
+  grid-column: 2 / -1;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(150px, auto);
+  gap: 20px;
+  border: 1px solid rgba(255,202,87,.2);
+  background: rgba(255,202,87,.04);
+}
+
+.lane-cancellation.is-confirmed {
+  border-color: rgba(217,255,67,.2);
+  background: rgba(217,255,67,.04);
+}
+
+.lane-cancellation.is-timed_out,
+.lane-cancellation.is-failed {
+  border-color: rgba(255,101,79,.24);
+  background: var(--coral-soft);
+}
+
+.lane-cancellation span {
+  display: block;
+  color: var(--muted);
+  font-size: 6px;
+  letter-spacing: .13em;
+}
+
+.lane-cancellation strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 8px;
+  line-height: 1.45;
 }
 
 .open-lane {
@@ -4872,6 +4941,12 @@ kbd {
 
   .lane-telemetry > div {
     padding: 7px;
+  }
+
+  .lane-cancellation {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
   .workspace-toolbar {

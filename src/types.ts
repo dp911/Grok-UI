@@ -144,7 +144,8 @@ export interface LiveSnapshot {
   agents: LiveAgent[]
 }
 
-export type ControlSessionState = 'starting' | 'idle' | 'working' | 'attention' | 'stopping' | 'failed'
+export type ControlSessionState = 'starting' | 'idle' | 'working' | 'attention' | 'stopping' | 'cancelled' | 'failed'
+export type ControlCancellationStatus = 'none' | 'requested' | 'confirmed' | 'timed_out' | 'failed'
 
 export interface ControlSession {
   id: string
@@ -157,6 +158,9 @@ export interface ControlSession {
   lastPrompt: string
   stopReason: string
   error: string
+  cancellationStatus: ControlCancellationStatus
+  cancelRequestedAt: string
+  cancelledAt: string
   inputTokens: number
   outputTokens: number
   totalTokens: number

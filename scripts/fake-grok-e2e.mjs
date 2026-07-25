@@ -27,7 +27,22 @@ if (args[0] !== 'agent') {
 }
 
 const sessions = new Set()
+const cancelledSessions = new Set()
+const cancelWaiters = new Map()
+const ignoredCancellationSessions = new Set()
 let sequence = 0
+
+function promptText(prompt) {
+  return prompt
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+}
+
+function waitForCancellation(sessionId) {
+  if (cancelledSessions.has(sessionId)) return Promise.resolve()
+  return new Promise((resolve) => cancelWaiters.set(sessionId, resolve))
+}
 
 const stream = acp.ndJsonStream(
   Writable.toWeb(process.stdout),
@@ -56,6 +71,7 @@ const agent = acp.agent({ name: 'grok-e2e' })
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     if (!sessions.has(params.sessionId)) throw new Error('Unknown e2e session.')
+    const instruction = promptText(params.prompt)
     await client.notify(acp.methods.client.session.update, {
       sessionId: params.sessionId,
       update: {
@@ -63,6 +79,39 @@ const agent = acp.agent({ name: 'grok-e2e' })
         content: { type: 'text', text: 'E2E agent received the command.' },
       },
     })
+    if (instruction.includes('long-running cancellation') || instruction.includes('ignored cancellation')) {
+      if (instruction.includes('ignored cancellation')) ignoredCancellationSessions.add(params.sessionId)
+      await client.notify(acp.methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'long-running-tool',
+          title: 'Long-running cancellation fixture',
+          kind: 'execute',
+          status: 'in_progress',
+          locations: [],
+          rawInput: {},
+        },
+      })
+      await waitForCancellation(params.sessionId)
+      await client.notify(acp.methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'long-running-tool',
+          title: 'Long-running cancellation fixture',
+          status: 'failed',
+        },
+      })
+      await client.notify(acp.methods.client.session.update, {
+        sessionId: params.sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Cancellation confirmed. No further tool work executed.' },
+        },
+      })
+      return { stopReason: 'cancelled' }
+    }
     const decision = await client.request(acp.methods.client.session.requestPermission, {
       sessionId: params.sessionId,
       toolCall: {
@@ -78,6 +127,16 @@ const agent = acp.agent({ name: 'grok-e2e' })
         { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
       ],
     })
+    const cancelled = decision.outcome.outcome === 'cancelled'
+    await client.notify(acp.methods.client.session.update, {
+      sessionId: params.sessionId,
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'e2e-tool',
+        title: 'Write the verified fixture',
+        status: cancelled ? 'failed' : 'completed',
+      },
+    })
     await client.notify(acp.methods.client.session.update, {
       sessionId: params.sessionId,
       update: {
@@ -86,15 +145,23 @@ const agent = acp.agent({ name: 'grok-e2e' })
           type: 'text',
           text: decision.outcome.outcome === 'selected'
             ? 'Permission approved and command completed.'
-            : 'Permission declined.',
+            : cancelled
+              ? 'Cancellation confirmed while permission was pending.'
+              : 'Permission declined.',
         },
       },
     })
+    if (cancelled) return { stopReason: 'cancelled' }
     return {
       stopReason: 'end_turn',
       usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
     }
   })
-  .onNotification(acp.methods.agent.session.cancel, () => {})
+  .onNotification(acp.methods.agent.session.cancel, ({ params }) => {
+    cancelledSessions.add(params.sessionId)
+    if (ignoredCancellationSessions.has(params.sessionId)) return
+    cancelWaiters.get(params.sessionId)?.()
+    cancelWaiters.delete(params.sessionId)
+  })
 
 agent.connect(stream)

@@ -19,6 +19,7 @@ import {
   resolveControlPermission,
 } from '../api'
 import type {
+  ControlSession,
   ControlSnapshot,
   DashboardPayload,
   LiveSnapshot,
@@ -42,6 +43,22 @@ function uniqueWorkspaces(data: DashboardPayload, live: LiveSnapshot | null): st
     ...(live?.agents.map((agent) => agent.cwd) || []),
     ...data.sessions.map((session) => session.cwd),
   ].filter(Boolean))]
+}
+
+function cancellationTime(session: ControlSession): string {
+  const value = session.cancelledAt || session.cancelRequestedAt
+  if (!value) return '—'
+  return new Date(value).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function lastCompletedTool(session: ControlSession): string {
+  return [...session.feed].reverse().find((item) =>
+    item.type === 'tool' && ['completed', 'success', 'done'].includes(item.status.toLowerCase()),
+  )?.title || 'No tool completed'
 }
 
 export function ControlView({ data, live, control, onRefresh, onOpenSession }: ControlViewProps) {
@@ -111,12 +128,23 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
   }
 
   const cancel = async (id: string) => {
+    setError('')
     try {
       await cancelControlSession(id)
+      setMessage('Stop requested. Waiting for Grok to confirm cancellation.')
       await onRefresh()
     } catch (cancelError) {
       setError(cancelError instanceof Error ? cancelError.message : 'Unable to stop the session.')
     }
+  }
+
+  const resume = (session: ControlSession) => {
+    setMode('resume')
+    chooseSession(session.id)
+    setMessage(`Ready to resume ${privacy.sessionTitle(session.title, session.id)}.`)
+    window.requestAnimationFrame(() => {
+      document.querySelector('.composer-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
 
   const decide = async (permissionId: string, optionId?: string) => {
@@ -325,12 +353,30 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
                 <div className="lane-telemetry">
                   <div><span>TOKENS</span><strong>{compact(session.totalTokens)}</strong></div>
                   <div><span>COST</span><strong>{session.costAmount ? `${session.costAmount.toFixed(3)} ${session.costCurrency}` : '—'}</strong></div>
-                  <div><span>STOP</span><strong>{session.stopReason || '—'}</strong></div>
+                  <div>
+                    <span>STOP</span>
+                    <strong>{session.stopReason === 'stop_requested' ? 'requested' : session.stopReason || '—'}</strong>
+                  </div>
                 </div>
                 <div className="lane-actions">
-                  {(session.state === 'working' || session.state === 'starting') && (
+                  {['working', 'starting', 'attention'].includes(session.state) && (
                     <button className="stop-lane" onClick={() => void cancel(session.id)}>
                       <CircleStop size={15} /> Stop
+                    </button>
+                  )}
+                  {session.state === 'stopping' && (
+                    <button className="stop-lane" disabled>
+                      <CircleStop size={15} /> Stop requested
+                    </button>
+                  )}
+                  {session.state === 'failed' && ['timed_out', 'failed'].includes(session.cancellationStatus) && (
+                    <button className="stop-lane" onClick={() => void cancel(session.id)}>
+                      <CircleStop size={15} /> Retry stop
+                    </button>
+                  )}
+                  {['idle', 'cancelled'].includes(session.state) && (
+                    <button className="resume-lane" onClick={() => resume(session)}>
+                      <Radio size={15} /> Resume
                     </button>
                   )}
                   <button className="open-lane" onClick={() => setSelectedLane(session.id)}>
@@ -340,6 +386,26 @@ export function ControlView({ data, live, control, onRefresh, onOpenSession }: C
                     Workbench
                   </button>
                 </div>
+                {session.cancellationStatus !== 'none' && (
+                  <div className={`lane-cancellation is-${session.cancellationStatus}`}>
+                    <div>
+                      <span>
+                        {session.cancellationStatus === 'confirmed'
+                          ? 'CANCELLED BY USER'
+                          : session.cancellationStatus === 'requested'
+                            ? 'STOP REQUESTED'
+                            : 'STOP NOT CONFIRMED'}
+                      </span>
+                      <strong>
+                        {session.error || (session.cancellationStatus === 'confirmed'
+                          ? 'Grok confirmed the turn stopped.'
+                          : 'Waiting for Grok to finish cancelling active work.')}
+                      </strong>
+                    </div>
+                    <div><span>TIME</span><strong>{cancellationTime(session)}</strong></div>
+                    <div><span>LAST COMPLETED TOOL</span><strong>{privacy.content(lastCompletedTool(session))}</strong></div>
+                  </div>
+                )}
               </article>
             ))}
           </div>

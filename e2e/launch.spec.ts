@@ -134,6 +134,60 @@ test.describe.serial('public launch path', () => {
     await expect(page.getByText('20')).toBeVisible()
   })
 
+  test('cancels cleanly while a permission decision is pending', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: /Control/ }).click()
+
+    await expect(page.getByText('ACP CONTROL LINKED')).toBeVisible({ timeout: 10_000 })
+    await page.getByLabel('WORKSPACE').fill(workspace)
+    await page.getByLabel('INSTRUCTION').fill('Hold for permission cancellation')
+    await page.getByRole('button', { name: 'LAUNCH AGENT' }).click()
+
+    const lane = page.locator('.lane-card').filter({ hasText: 'Hold for permission cancellation' })
+    await expect(lane.locator('.lane-state')).toContainText('attention')
+    await lane.getByRole('button', { name: 'Stop', exact: true }).click()
+
+    await expect(lane.locator('.lane-state')).toContainText('cancelled')
+    await expect(lane.getByText('CANCELLED BY USER')).toBeVisible()
+    await lane.getByRole('button', { name: 'Open stream' }).click()
+    await expect(page.getByText('Cancellation confirmed while permission was pending.')).toBeVisible()
+    await expect(page.locator('.approval-card')).toHaveCount(0)
+    await expect(lane.getByRole('button', { name: 'Resume' })).toBeVisible()
+  })
+
+  test('cancels an active tool and records a confirmed post-stop result', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: /Control/ }).click()
+
+    await expect(page.getByText('ACP CONTROL LINKED')).toBeVisible({ timeout: 10_000 })
+    await page.getByLabel('WORKSPACE').fill(workspace)
+    await page.getByLabel('INSTRUCTION').fill('Run the long-running cancellation verification')
+    await page.getByRole('button', { name: 'LAUNCH AGENT' }).click()
+
+    const lane = page.locator('.lane-card').filter({ hasText: 'Run the long-running cancellation verification' })
+    await expect(lane.locator('.lane-state')).toContainText('working')
+    await lane.getByRole('button', { name: 'Open stream' }).click()
+    await expect(page.getByText('Long-running cancellation fixture')).toBeVisible()
+    await lane.getByRole('button', { name: 'Stop', exact: true }).click()
+
+    await expect(lane.locator('.lane-state')).toContainText('cancelled')
+    await expect(lane.getByText('CANCELLED BY USER')).toBeVisible()
+    await expect(lane.getByText('Grok confirmed the turn stopped.')).toBeVisible()
+    await expect(lane.getByText('No tool completed')).toBeVisible()
+    await expect(page.getByText('Cancellation confirmed. No further tool work executed.')).toBeVisible()
+
+    const snapshot = await (await page.request.get('/api/control')).json()
+    const session = snapshot.sessions.find((item: { title: string }) =>
+      item.title === 'Run the long-running cancellation verification')
+    expect(session.cancellationStatus).toBe('confirmed')
+    expect(session.stopReason).toBe('cancelled')
+    expect(session.cancelRequestedAt).toBeTruthy()
+    expect(session.cancelledAt).toBeTruthy()
+    expect(session.feed.filter((item: { type: string; status: string }) =>
+      item.type === 'tool' && item.status === 'completed')).toHaveLength(0)
+    expect(session.feed.filter((item: { type: string }) => item.type === 'tool').at(-1).status).toBe('cancelled')
+  })
+
   test('keeps the dashboard within a mobile viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/')

@@ -45,6 +45,9 @@ function normalizeControlSession(value: unknown): ControlSession | null {
       ? 'server_restarted'
       : typeof item.stopReason === 'string' ? item.stopReason : '',
     error: typeof item.error === 'string' ? item.error : '',
+    cancellationStatus: item.cancellationStatus === 'confirmed' ? 'confirmed' : 'none',
+    cancelRequestedAt: typeof item.cancelRequestedAt === 'string' ? item.cancelRequestedAt : '',
+    cancelledAt: typeof item.cancelledAt === 'string' ? item.cancelledAt : '',
     inputTokens: Number(item.inputTokens) || 0,
     outputTokens: Number(item.outputTokens) || 0,
     totalTokens: Number(item.totalTokens) || 0,

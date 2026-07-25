@@ -71,6 +71,9 @@ function elapsed(value: string): string {
 }
 
 function statusLabel(data: SessionWorkbenchData | null): string {
+  if (data?.control?.state === 'stopping') return 'STOPPING'
+  if (data?.control?.state === 'cancelled') return 'CANCELLED'
+  if (data?.control?.cancellationStatus === 'timed_out') return 'STOP NOT CONFIRMED'
   if (data?.control?.state === 'attention' || data?.live?.state === 'attention') return 'NEEDS INPUT'
   if (data?.control?.state === 'working' || data?.live?.state === 'working') return 'WORKING'
   if (data?.live) return 'CLI ATTACHED'
@@ -202,7 +205,7 @@ export function SessionWorkbench({
     setError('')
     try {
       await cancelWorkbenchSession(sessionId)
-      setMessage('Cancellation requested.')
+      setMessage('Stop requested. Waiting for Grok to confirm cancellation.')
       await refresh(true)
     } catch (cancelError) {
       setError(cancelError instanceof Error ? cancelError.message : 'Unable to cancel this turn.')
@@ -247,7 +250,21 @@ export function SessionWorkbench({
   const isWorking = data?.control?.state === 'working'
     || data?.control?.state === 'starting'
     || data?.live?.state === 'working'
-  const canCancel = data?.managed && ['working', 'starting', 'attention'].includes(data.control?.state || '')
+  const canCancel = Boolean(
+    data?.managed
+    && (
+      ['working', 'starting', 'attention'].includes(data.control?.state || '')
+      || ['timed_out', 'failed'].includes(data.control?.cancellationStatus || '')
+    )
+  )
+  const cancellationNotice = data?.control?.state === 'cancelled'
+    ? `Cancelled by user at ${time(data.control.cancelledAt || data.control.updatedAt)}.`
+    : data?.control?.state === 'stopping'
+      ? 'Stop requested. Waiting for Grok to confirm cancellation.'
+      : ''
+  const cancellationError = ['timed_out', 'failed'].includes(data?.control?.cancellationStatus || '')
+    ? data?.control?.error || ''
+    : ''
   const transcript = data?.transcript || []
   const toolCount = useMemo(() => transcript.filter((item) => item.type === 'tool').length, [transcript])
   const turnCount = useMemo(() => transcript.filter((item) => item.type === 'user').length, [transcript])
@@ -290,7 +307,7 @@ export function SessionWorkbench({
             </button>
             {canCancel && (
               <button className="workbench-stop" onClick={() => void cancel()}>
-                <CircleStop size={16} /> Stop turn
+                <CircleStop size={16} /> {data?.control?.cancellationStatus === 'timed_out' ? 'Retry stop' : 'Stop turn'}
               </button>
             )}
             <button className="icon-button" onClick={onClose} aria-label="Close session workbench"><X size={19} /></button>
@@ -323,10 +340,10 @@ export function SessionWorkbench({
           </button>
         </nav>
 
-        {error
-          ? <div className="workbench-banner is-error"><ShieldAlert size={16} /><span>{privacy.content(error)}</span></div>
-          : message
-            ? <div className="workbench-banner is-success"><Check size={16} /><span>{message}</span></div>
+        {error || cancellationError
+          ? <div className="workbench-banner is-error"><ShieldAlert size={16} /><span>{privacy.content(error || cancellationError)}</span></div>
+          : cancellationNotice || message
+            ? <div className="workbench-banner is-success"><Check size={16} /><span>{cancellationNotice || message}</span></div>
             : <div className="workbench-banner-placeholder" aria-hidden="true" />}
 
         <div className="workbench-body">
@@ -368,7 +385,7 @@ export function SessionWorkbench({
             maxLength={32_000}
             required
           />
-          <button disabled={sending || !control?.connected || !prompt.trim()}>
+          <button disabled={sending || !control?.connected || !prompt.trim() || data?.control?.state === 'stopping'}>
             {sending ? <LoaderCircle className="is-spinning" size={17} /> : <CornerDownLeft size={17} />}
             <span>{sending ? 'SENDING' : data?.managed ? 'SEND' : 'ATTACH'}</span>
           </button>
