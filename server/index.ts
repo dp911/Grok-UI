@@ -9,8 +9,6 @@ import { WorkspaceInspector } from './workspace-inspector.js'
 import { SessionStateStore } from './session-state.js'
 import { mergeSessionFeed, SessionReader } from './session-reader.js'
 import type {
-  ControlSession,
-  LiveAgent,
   SessionRow,
   UsageGroupDimension,
   UsageBudgetDimension,
@@ -20,14 +18,24 @@ import type {
 } from './types.js'
 import { APP_VERSION } from './app-version.js'
 import { inspectSetup } from './setup-diagnostics.js'
-import { UsageLedger } from './usage-ledger.js'
+import {
+  UsageLedger,
+  USAGE_GROUPS,
+  USAGE_PERIODS,
+  USAGE_SCOPES,
+} from './usage-ledger.js'
 import { RuntimeInspector } from './runtime-inspector.js'
 import { UsageBudgetManager } from './usage-budgets.js'
 import { usageExport, type UsageExportFormat } from './usage-export.js'
+import { FleetRegistryStore, publicHostConfig } from './fleet-registry.js'
+import { FleetMonitor } from './fleet-monitor.js'
+import { controlSessionRow, liveAgentRow } from './session-projection.js'
 
 const app = express()
 const sessionState = new SessionStateStore()
 await sessionState.load()
+const fleetRegistry = new FleetRegistryStore()
+await fleetRegistry.load()
 const store = new GrokStore(undefined, sessionState)
 const liveMonitor = new LiveMonitor(store)
 const controller = new GrokController(sessionState)
@@ -37,6 +45,7 @@ const sessionReader = new SessionReader(store.grokHome)
 const usageLedger = new UsageLedger(sessionState)
 const usageBudgets = new UsageBudgetManager(sessionState, usageLedger)
 const runtimeInspector = new RuntimeInspector()
+const fleetMonitor = new FleetMonitor(fleetRegistry)
 const port = Number(process.env.PORT || 4310)
 const host = process.env.HOST || '127.0.0.1'
 const security = new SecurityGate(host)
@@ -80,6 +89,7 @@ controller.on('control', (payload) => {
 })
 workspaceInspector.on('change', (payload) => broadcast('workspace', payload))
 runtimeInspector.on('runtime', (payload) => broadcast('runtime', payload))
+fleetMonitor.on('fleet', (payload) => broadcast('fleet', payload))
 
 app.disable('x-powered-by')
 app.use(express.json({ limit: '64kb' }))
@@ -119,9 +129,97 @@ app.get('/api/runtime', async (request, response, next) => {
   }
 })
 
-const USAGE_PERIODS = new Set<UsagePeriod>(['24h', '7d', '30d', '90d', 'all'])
-const USAGE_SCOPES = new Set<UsageScope>(['sessions', 'workflow-agents', 'all'])
-const USAGE_GROUPS = new Set<UsageGroupDimension>(['project', 'model', 'session', 'agent'])
+app.get('/api/fleet', (_request, response) => {
+  response.json(fleetMonitor.snapshot())
+})
+
+app.post('/api/fleet/hosts', async (request, response) => {
+  try {
+    const host = await fleetRegistry.create(request.body || {})
+    fleetMonitor.syncRegistry()
+    void fleetMonitor.refresh(host.id).catch(() => {
+      // The fleet snapshot exposes the bounded connection failure.
+    })
+    response.status(201).json({
+      host: publicHostConfig(host),
+      fleet: fleetMonitor.snapshot(),
+    })
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Invalid fleet host.' })
+  }
+})
+
+app.patch('/api/fleet/hosts/:id', async (request, response) => {
+  try {
+    const host = await fleetRegistry.update(request.params.id, request.body || {})
+    fleetMonitor.syncRegistry()
+    void fleetMonitor.refresh(host.id).catch(() => {
+      // The fleet snapshot exposes the bounded connection failure.
+    })
+    response.json({
+      host: publicHostConfig(host),
+      fleet: fleetMonitor.snapshot(),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid fleet host.'
+    response.status(message.includes('not found') ? 404 : 400).json({ error: message })
+  }
+})
+
+app.delete('/api/fleet/hosts/:id', async (request, response) => {
+  try {
+    if (!(await fleetRegistry.remove(request.params.id))) {
+      response.status(404).json({ error: 'Fleet host was not found.' })
+      return
+    }
+    fleetMonitor.syncRegistry()
+    response.status(204).end()
+  } catch (error) {
+    response.status(409).json({ error: error instanceof Error ? error.message : 'Fleet registry is unavailable.' })
+  }
+})
+
+app.post('/api/fleet/hosts/:id/refresh', async (request, response) => {
+  try {
+    response.json(await fleetMonitor.refresh(request.params.id))
+  } catch (error) {
+    response.status(404).json({ error: error instanceof Error ? error.message : 'Fleet host was not found.' })
+  }
+})
+
+app.get('/api/fleet/hosts/:id/sessions/:sessionId', async (request, response) => {
+  try {
+    response.json(await fleetMonitor.sessionDetail(request.params.id, request.params.sessionId))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Remote session is unavailable.'
+    response.status(message.includes('not found') ? 404 : 503).json({ error: message })
+  }
+})
+
+app.get('/api/fleet/hosts/:id/usage', async (request, response) => {
+  const period = typeof request.query.period === 'string' ? request.query.period : '30d'
+  const scope = typeof request.query.scope === 'string' ? request.query.scope : 'sessions'
+  const groupBy = typeof request.query.groupBy === 'string' ? request.query.groupBy : 'project'
+  if (
+    !USAGE_PERIODS.has(period as UsagePeriod)
+    || !USAGE_SCOPES.has(scope as UsageScope)
+    || !USAGE_GROUPS.has(groupBy as UsageGroupDimension)
+  ) {
+    response.status(400).json({ error: 'Invalid remote usage report options.' })
+    return
+  }
+  try {
+    response.json(await fleetMonitor.usage(
+      request.params.id,
+      period as UsagePeriod,
+      scope as UsageScope,
+      groupBy as UsageGroupDimension,
+    ))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Remote usage is unavailable.'
+    response.status(message.includes('not found') ? 404 : 503).json({ error: message })
+  }
+})
 
 app.get('/api/usage', async (request, response, next) => {
   try {
@@ -310,75 +408,13 @@ app.post('/api/control/permissions/:id', (request, response) => {
   response.json({ resolved: true })
 })
 
-function controlRow(session: ControlSession): SessionRow {
-  return {
-    id: session.id,
-    title: session.title,
-    summary: '',
-    cwd: session.cwd,
-    workspace: path.basename(session.cwd) || session.cwd,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    model: session.model || 'Grok default',
-    agent: 'Grok UI',
-    reasoningEffort: 'default',
-    sandboxProfile: 'native permissions',
-    messages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
-    chatMessages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
-    turns: session.feed.filter((item) => item.type === 'user').length,
-    toolCalls: session.feed.filter((item) => item.type === 'tool').length,
-    errors: session.state === 'failed' ? 1 : 0,
-    filesTouched: 0,
-    linesAdded: 0,
-    linesRemoved: 0,
-    durationSeconds: Math.max(0, (Date.now() - new Date(session.createdAt).getTime()) / 1_000),
-    contextUsage: 0,
-    status: session.state === 'attention'
-      ? 'attention'
-      : session.state === 'working' || session.state === 'starting' ? 'live' : 'recent',
-    diskBytes: 0,
-    archived: false,
-  }
-}
-
-function liveRow(session: LiveAgent): SessionRow {
-  return {
-    id: session.id,
-    title: session.title,
-    summary: '',
-    cwd: session.cwd,
-    workspace: session.workspace,
-    createdAt: session.openedAt,
-    updatedAt: session.updatedAt,
-    model: session.model,
-    agent: 'Grok CLI',
-    reasoningEffort: 'default',
-    sandboxProfile: 'CLI process',
-    messages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
-    chatMessages: session.feed.filter((item) => item.type === 'user' || item.type === 'assistant').length,
-    turns: session.turns,
-    toolCalls: session.toolCalls,
-    errors: 0,
-    filesTouched: 0,
-    linesAdded: 0,
-    linesRemoved: 0,
-    durationSeconds: Math.max(0, (Date.now() - new Date(session.openedAt).getTime()) / 1_000),
-    contextUsage: session.contextUsage,
-    status: session.state === 'attention'
-      ? 'attention'
-      : session.state === 'working' || session.state === 'waiting' ? 'live' : 'recent',
-    diskBytes: 0,
-    archived: false,
-  }
-}
-
 async function resolveSession(sessionId: string): Promise<SessionRow | null> {
   const recorded = await store.session(sessionId)
   if (recorded) return recorded
   const controlled = controller.snapshot().sessions.find((session) => session.id === sessionId)
-  if (controlled) return sessionState.apply(controlRow(controlled))
+  if (controlled) return sessionState.apply(controlSessionRow(controlled))
   const live = liveMonitor.snapshot().agents.find((session) => session.id === sessionId)
-  return live ? sessionState.apply(liveRow(live)) : null
+  return live ? sessionState.apply(liveAgentRow(live)) : null
 }
 
 async function workspaceAllowed(cwd: string): Promise<boolean> {
@@ -507,6 +543,7 @@ app.get('/api/events', (request, response) => {
   response.write(`event: live\ndata: ${JSON.stringify(liveMonitor.snapshot())}\n\n`)
   response.write(`event: control\ndata: ${JSON.stringify(controller.snapshot())}\n\n`)
   response.write(`event: runtime\ndata: ${JSON.stringify(runtimeInspector.snapshot())}\n\n`)
+  response.write(`event: fleet\ndata: ${JSON.stringify(fleetMonitor.snapshot())}\n\n`)
   void store.dashboard().then((payload) => {
     response.write(`event: dashboard\ndata: ${JSON.stringify(payload)}\n\n`)
   })
@@ -546,6 +583,9 @@ await liveMonitor.start()
 runtimeInspector.update(liveMonitor.snapshot(), controller.snapshot())
 await runtimeInspector.start()
 await syncUsage()
+void fleetMonitor.start().catch((error) => {
+  console.error('Fleet monitor failed to start:', error)
+})
 
 export const server = await new Promise<ReturnType<typeof app.listen>>((resolve, reject) => {
   const listener = app.listen(port, host, () => resolve(listener))
@@ -568,6 +608,7 @@ async function shutdown() {
   await Promise.all([
     liveMonitor.stop(),
     runtimeInspector.stop(),
+    fleetMonitor.stop(),
     controller.stop(),
     workspaceInspector.close(),
   ])
