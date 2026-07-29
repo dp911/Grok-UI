@@ -4578,6 +4578,14 @@ kbd {
     width: 100%;
   }
 
+  .runtime-identity span {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .runtime-identity h2 {
     display: -webkit-box;
     font-size: 14px;

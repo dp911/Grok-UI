@@ -263,13 +263,25 @@ test.describe.serial('public launch path', () => {
   test('opens a live agent in the clearly labeled Session Console', async ({ page }) => {
     await page.goto('/')
 
-    await page.getByRole('button', { name: 'Open Session' }).click()
+    const openSession = page.getByRole('button', { name: 'Open Session' })
+    await openSession.click()
 
-    await expect(page.getByRole('dialog', { name: /Session console:/ })).toBeVisible()
+    const dialog = page.getByRole('dialog', { name: /Session console:/ })
+    await expect(dialog).toBeVisible()
     await expect(page.getByText(/SESSION CONSOLE/)).toBeVisible()
     await expect(page.getByText('Chat with this agent, review its activity, and inspect changes.')).toBeVisible()
     await expect(page.getByRole('navigation', { name: 'Session console sections' })).toBeVisible()
-    await expect(page.getByPlaceholder('Send a follow-up to this session…')).toBeVisible()
+    const prompt = page.getByPlaceholder('Send a follow-up to this session…')
+    const closeButton = page.getByRole('button', { name: 'Close session console panel' })
+    await expect(prompt).toBeVisible()
+    await expect(closeButton).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+    await page.keyboard.press('Tab')
+    await expect(closeButton).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: /Session console:/ })).toHaveCount(0)
+    await expect(openSession).toBeFocused()
   })
 
   test('redacts sensitive runtime data and persists Privacy Mode', async ({ page }) => {
@@ -553,8 +565,30 @@ test.describe.serial('public launch path', () => {
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
+      offenders: [...document.querySelectorAll<HTMLElement>('body *')]
+        .map((element) => {
+          const bounds = element.getBoundingClientRect()
+          return {
+            selector: `${element.tagName.toLowerCase()}.${element.className}`,
+            parent: element.parentElement
+              ? `${element.parentElement.tagName.toLowerCase()}.${element.parentElement.className}`
+              : '',
+            text: element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 120),
+            left: bounds.left,
+            right: bounds.right,
+            width: bounds.width,
+          }
+        })
+        .filter((element) =>
+          element.right > document.documentElement.clientWidth + 0.5
+          || element.left < -0.5)
+        .sort((left, right) => right.right - left.right)
+        .slice(0, 12),
     }))
-    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth)
+    expect(
+      overflow.scrollWidth,
+      `Horizontal overflow: ${JSON.stringify(overflow.offenders)}`,
+    ).toBeLessThanOrEqual(overflow.clientWidth)
     expect(await unreadableVisibleText(page)).toEqual([])
 
     await page.getByRole('button', { name: 'Open Session' }).click()
@@ -637,7 +671,10 @@ test.describe.serial('public launch path', () => {
       .getByRole('button', { name: /Usage/ })
       .click()
     await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeHidden()
-    await expect(page.locator('.main-stage')).toBeFocused()
+    const mainStage = page.locator('.main-stage')
+    await expect(mainStage).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(mainStage).toBeFocused()
   })
 
   test('keeps remote chat above mobile navigation and sends a follow-up', async ({ page }) => {
@@ -650,10 +687,13 @@ test.describe.serial('public launch path', () => {
     await mobileNav.getByRole('button', { name: 'Fleet' }).click()
     await page.locator('.fleet-host-row').filter({ hasText: 'Mobile Build Mac' }).click()
     await page.getByRole('tab', { name: 'Sessions' }).click()
-    await page.getByRole('button', { name: /Continue remote session/ }).click()
+    const continueButton = page.getByRole('button', { name: /Continue remote session/ })
+    await continueButton.click()
 
     await expect(page.getByRole('dialog', { name: /Remote session:/ })).toBeVisible()
     await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toHaveCount(0)
+    const closeButton = page.getByRole('button', { name: 'Close remote session panel' })
+    await expect(closeButton).toBeFocused()
 
     const composer = page.locator('.workbench-composer')
     const prompt = page.getByPlaceholder('Continue this Grok Build session…')
@@ -669,8 +709,15 @@ test.describe.serial('public launch path', () => {
       timeout: 10_000,
     })
 
-    await page.getByRole('button', { name: 'Close remote session panel' }).click()
+    await closeButton.click()
     await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
+    await expect(continueButton).toBeFocused()
+
+    await continueButton.click()
+    await expect(closeButton).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: /Remote session:/ })).toHaveCount(0)
+    await expect(continueButton).toBeFocused()
   })
 
   test('keeps supporting text readable across every dashboard section', async ({ page }) => {

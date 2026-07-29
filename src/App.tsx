@@ -199,17 +199,24 @@ function App() {
   const [error, setError] = useState('')
   const [fleetError, setFleetError] = useState('')
   const [query, setQuery] = useState('')
-  const [selectedSession, setSelectedSession] = useState<{ id: string; fallback: SessionRow | null } | null>(null)
+  const [selectedSession, setSelectedSession] = useState<{
+    id: string
+    fallback: SessionRow | null
+    opener: HTMLElement | null
+  } | null>(null)
   const [remoteSession, setRemoteSession] = useState<{
     host: FleetHostView
     session: SessionRow
+    opener: HTMLElement | null
   } | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [theme, setTheme] = useState<ThemeId>(storedTheme)
   const [privacyMode, setPrivacyMode] = useState(storedPrivacy)
   const lastAttentionRef = useRef(0)
+  const lastInteractionRef = useRef<HTMLElement | null>(null)
   const mobileNavTriggerRef = useRef<HTMLElement | null>(null)
+  const mobileNavOpenRef = useRef(false)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -338,17 +345,30 @@ function App() {
     lastAttentionRef.current = attention
   }, [control?.permissions, live?.attentionCount, privacyMode])
 
-  const openMobileNav = useCallback(() => {
-    mobileNavTriggerRef.current = document.activeElement instanceof HTMLElement
+  const takeInteractionTarget = useCallback(() => {
+    const interaction = lastInteractionRef.current?.isConnected
+      ? lastInteractionRef.current
+      : null
+    lastInteractionRef.current = null
+    if (interaction) return interaction
+    return document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
       : null
-    setMobileNavOpen(true)
   }, [])
 
+  const openMobileNav = useCallback(() => {
+    mobileNavTriggerRef.current = takeInteractionTarget()
+    mobileNavOpenRef.current = true
+    setMobileNavOpen(true)
+  }, [takeInteractionTarget])
+
   const closeMobileNav = useCallback(() => {
+    if (!mobileNavOpenRef.current) return
+    mobileNavOpenRef.current = false
     setMobileNavOpen(false)
     requestAnimationFrame(() => {
       const trigger = mobileNavTriggerRef.current
+      mobileNavTriggerRef.current = null
       if (trigger?.isConnected) trigger.focus()
     })
   }, [])
@@ -365,17 +385,18 @@ function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       const typing = target.matches('input, textarea, [contenteditable="true"]')
+      if (selectedSession || remoteSession) return
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setPaletteOpen((open) => !open)
         return
       }
       if (event.key === 'Escape') {
-        setPaletteOpen(false)
-        setSelectedSession(null)
-        setRemoteSession(null)
-        closeMobileNav()
+        if (paletteOpen) setPaletteOpen(false)
+        else closeMobileNav()
+        return
       }
+      if (paletteOpen || mobileNavOpenRef.current) return
       if (!typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const navItem = NAV_ITEMS.find((item) => item.shortcut === event.key)
         if (navItem) setView(navItem.id)
@@ -387,10 +408,12 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [closeMobileNav])
+  }, [closeMobileNav, paletteOpen, remoteSession, selectedSession])
 
   const setActiveView = (next: ViewId) => {
-    const focusMain = mobileNavOpen
+    const focusMain = mobileNavOpenRef.current
+    mobileNavOpenRef.current = false
+    mobileNavTriggerRef.current = null
     setView(next)
     setQuery('')
     setMobileNavOpen(false)
@@ -416,17 +439,28 @@ function App() {
   }, [])
 
   const openSession = useCallback((session: SessionRow | string) => {
+    const opener = takeInteractionTarget()
     setSelectedSession(typeof session === 'string'
-      ? { id: session, fallback: data?.sessions.find((item) => item.id === session) || null }
-      : { id: session.id, fallback: session })
-  }, [data?.sessions])
+      ? { id: session, fallback: data?.sessions.find((item) => item.id === session) || null, opener }
+      : { id: session.id, fallback: session, opener })
+  }, [data?.sessions, takeInteractionTarget])
 
   if (authenticated === null) return <BootScreen label="SECURING LOCAL LINK" />
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} />
 
   return (
     <PrivacyProvider enabled={privacyMode}>
-      <div className="app-shell" data-theme={theme} data-privacy={privacyMode ? 'on' : 'off'}>
+      <div
+        className="app-shell"
+        data-theme={theme}
+        data-privacy={privacyMode ? 'on' : 'off'}
+        onClickCapture={(event) => {
+          if (!(event.target instanceof Element)) return
+          lastInteractionRef.current = event.target.closest<HTMLElement>(
+            'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          )
+        }}
+      >
         <AmbientGrid />
         <Sidebar
           active={view}
@@ -519,7 +553,9 @@ function App() {
                 error={fleetError}
                 onReload={refreshFleet}
                 onFleetChange={setFleet}
-                onOpenRemoteSession={(host, session) => setRemoteSession({ host, session })}
+                onOpenRemoteSession={(host, session) => {
+                  setRemoteSession({ host, session, opener: takeInteractionTarget() })
+                }}
               />
             )}
             {view === 'library' && <LibraryView data={data} query={query} onQuery={setQuery} />}
@@ -543,6 +579,7 @@ function App() {
             fallback={data?.sessions.find((item) => item.id === selectedSession.id) || selectedSession.fallback}
             live={live}
             control={control}
+            returnFocus={selectedSession.opener}
             onClose={() => setSelectedSession(null)}
             onUpdated={() => load(true)}
           />
@@ -554,6 +591,7 @@ function App() {
             transport={remoteSession.host.transport}
             sessionId={remoteSession.session.id}
             fallback={remoteSession.session}
+            returnFocus={remoteSession.opener}
             onClose={() => setRemoteSession(null)}
           />
         )}

@@ -38,6 +38,7 @@ import {
   stopSessionPreview,
   updateSession,
 } from '../api'
+import { useModalFocus } from '../hooks/useModalFocus'
 import type {
   ControlPermission,
   ControlSnapshot,
@@ -59,6 +60,7 @@ interface SessionWorkbenchProps {
   fallback: SessionRow | null
   live: LiveSnapshot | null
   control: ControlSnapshot | null
+  returnFocus?: HTMLElement | null
   onClose: () => void
   onUpdated: () => Promise<void>
 }
@@ -97,6 +99,7 @@ export function SessionWorkbench({
   fallback,
   live,
   control,
+  returnFocus,
   onClose,
   onUpdated,
 }: SessionWorkbenchProps) {
@@ -120,6 +123,11 @@ export function SessionWorkbench({
   const [previewViewport, setPreviewViewport] = useState<PreviewViewport>('desktop')
   const [previewRevision, setPreviewRevision] = useState(0)
   const feedRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useModalFocus<HTMLDivElement>(
+    onClose,
+    '[aria-label="Close session console panel"]',
+    returnFocus,
+  )
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setRefreshing(true)
@@ -336,12 +344,19 @@ export function SessionWorkbench({
 
   return (
     <div
+      ref={dialogRef}
       className="workbench-layer"
       role="dialog"
       aria-modal="true"
       aria-label={`Session console: ${privacy.sessionTitle(session?.title || sessionId, sessionId)}`}
+      tabIndex={-1}
     >
-      <button className="workbench-scrim" onClick={onClose} aria-label="Close session console" />
+      <button
+        className="workbench-scrim"
+        onClick={onClose}
+        aria-label="Close session console"
+        tabIndex={-1}
+      />
       <section className="session-workbench">
         <header className="workbench-head">
           <div className="workbench-identity">
@@ -390,7 +405,7 @@ export function SessionWorkbench({
                 <span>{data?.control?.cancellationStatus === 'timed_out' ? 'Retry stop' : 'Stop turn'}</span>
               </button>
             )}
-            <button className="icon-button" onClick={onClose} aria-label="Close session console"><X size={19} /></button>
+            <button className="icon-button" onClick={onClose} aria-label="Close session console panel"><X size={19} /></button>
           </div>
         </header>
 

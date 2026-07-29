@@ -20,6 +20,7 @@ import {
   remoteSessionEventsUrl,
   resolveRemotePermission,
 } from '../api'
+import { useModalFocus } from '../hooks/useModalFocus'
 import { usePrivacy } from '../privacy'
 import type { FleetTransportKind, RemoteSessionSnapshot, SessionRow } from '../types'
 import { SessionTimeline } from './SessionWorkbench'
@@ -58,6 +59,7 @@ export function RemoteSessionWorkbench({
   transport,
   sessionId,
   fallback,
+  returnFocus,
   onClose,
 }: {
   hostId: string
@@ -65,6 +67,7 @@ export function RemoteSessionWorkbench({
   transport: FleetTransportKind
   sessionId: string
   fallback: SessionRow | null
+  returnFocus?: HTMLElement | null
   onClose: () => void
 }) {
   const privacy = usePrivacy()
@@ -82,6 +85,11 @@ export function RemoteSessionWorkbench({
   const permissionCommands = useRef(new Map<string, PendingCommand>())
   const interruptCommand = useRef<PendingCommand | null>(null)
   const feedRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useModalFocus<HTMLDivElement>(
+    onClose,
+    '[aria-label="Close remote session panel"]',
+    returnFocus,
+  )
 
   const refresh = useCallback(async (quiet = false) => {
     if (!quiet) setRefreshing(true)
@@ -229,12 +237,19 @@ export function RemoteSessionWorkbench({
 
   return (
     <div
+      ref={dialogRef}
       className="workbench-layer"
       role="dialog"
       aria-modal="true"
       aria-label={`Remote session: ${privacy.sessionTitle(session?.title || sessionId, sessionId)}`}
+      tabIndex={-1}
     >
-      <button className="workbench-scrim" onClick={onClose} aria-label="Dismiss remote session" />
+      <button
+        className="workbench-scrim"
+        onClick={onClose}
+        aria-label="Dismiss remote session"
+        tabIndex={-1}
+      />
       <section className="session-workbench remote-session-workbench">
         <header className="workbench-head">
           <div className="workbench-identity">

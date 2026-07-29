@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const browser = process.env.PLAYWRIGHT_BROWSER === 'webkit' ? 'webkit' : 'chromium'
+const browserDevice = browser === 'webkit' ? 'Desktop Safari' : 'Desktop Chrome'
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -16,8 +19,8 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      name: browser,
+      use: { ...devices[browserDevice] },
     },
   ],
   webServer: {
