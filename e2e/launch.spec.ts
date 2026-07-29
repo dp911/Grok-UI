@@ -631,6 +631,13 @@ test.describe.serial('public launch path', () => {
     await page.locator('.sidebar-close').click()
     await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
     await expect(moreButton).toBeFocused()
+
+    await moreButton.click()
+    await page.getByRole('navigation', { name: 'Primary navigation' })
+      .getByRole('button', { name: /Usage/ })
+      .click()
+    await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeHidden()
+    await expect(page.locator('.main-stage')).toBeFocused()
   })
 
   test('keeps remote chat above mobile navigation and sends a follow-up', async ({ page }) => {

@@ -390,9 +390,15 @@ function App() {
   }, [closeMobileNav])
 
   const setActiveView = (next: ViewId) => {
+    const focusMain = mobileNavOpen
     setView(next)
     setQuery('')
     setMobileNavOpen(false)
+    if (focusMain) {
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('.main-stage')?.focus()
+      })
+    }
   }
 
   const refreshControl = useCallback(async () => {
@@ -431,7 +437,7 @@ function App() {
           onClose={closeMobileNav}
         />
 
-        <main className="main-stage">
+        <main className="main-stage" tabIndex={-1}>
           <TopBar
             active={view}
             connected={streamConnected}
