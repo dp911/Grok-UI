@@ -29,8 +29,9 @@ Options:
 Remote binds require GROK_UI_TOKEN. Run \`grok-ui doctor\` to check the
 local Node.js, Grok CLI, authentication, and state prerequisites.
 
-The read-only host agent uses port 4311 by default and always requires
-GROK_UI_AGENT_TOKEN, including on loopback.
+The host agent uses port 4311 by default and always requires
+GROK_UI_AGENT_TOKEN, including on loopback. Secure remote sessions are disabled
+unless GROK_UI_AGENT_CONTROL_TOKEN is also set to a different secret.
 `.trim())
 }
 

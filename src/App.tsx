@@ -51,6 +51,7 @@ import type {
   ControlSnapshot,
   DashboardPayload,
   FleetSnapshot,
+  FleetHostView,
   LiveAgent,
   LiveFeedItem,
   LiveSnapshot,
@@ -65,6 +66,7 @@ import type {
 import { ChangesView } from './views/ChangesView'
 import { ControlView } from './views/ControlView'
 import { SessionWorkbench } from './views/SessionWorkbench'
+import { RemoteSessionWorkbench } from './views/RemoteSessionWorkbench'
 import { WorkflowsView } from './views/WorkflowsView'
 import { UsageView } from './views/UsageView'
 import { RuntimeIntelligencePanels } from './views/RuntimeIntelligencePanels'
@@ -185,6 +187,10 @@ function App() {
   const [fleetError, setFleetError] = useState('')
   const [query, setQuery] = useState('')
   const [selectedSession, setSelectedSession] = useState<{ id: string; fallback: SessionRow | null } | null>(null)
+  const [remoteSession, setRemoteSession] = useState<{
+    host: FleetHostView
+    session: SessionRow
+  } | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [theme, setTheme] = useState<ThemeId>(storedTheme)
@@ -327,6 +333,7 @@ function App() {
       if (event.key === 'Escape') {
         setPaletteOpen(false)
         setSelectedSession(null)
+        setRemoteSession(null)
         setMobileNavOpen(false)
       }
       if (!typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -466,6 +473,7 @@ function App() {
                 error={fleetError}
                 onReload={refreshFleet}
                 onFleetChange={setFleet}
+                onOpenRemoteSession={(host, session) => setRemoteSession({ host, session })}
               />
             )}
             {view === 'library' && <LibraryView data={data} query={query} onQuery={setQuery} />}
@@ -484,6 +492,16 @@ function App() {
             control={control}
             onClose={() => setSelectedSession(null)}
             onUpdated={() => load(true)}
+          />
+        )}
+        {remoteSession && (
+          <RemoteSessionWorkbench
+            hostId={remoteSession.host.id}
+            hostLabel={remoteSession.host.label}
+            transport={remoteSession.host.transport}
+            sessionId={remoteSession.session.id}
+            fallback={remoteSession.session}
+            onClose={() => setRemoteSession(null)}
           />
         )}
         {paletteOpen && (

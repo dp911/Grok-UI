@@ -23,6 +23,13 @@ export class FleetConnectionError extends Error {
 
 export interface FleetConnector {
   getJson(host: FleetHostConfig, fixedPath: string, timeoutMs?: number): Promise<unknown>
+  getControlJson?(host: FleetHostConfig, fixedPath: string, timeoutMs?: number): Promise<unknown>
+  postControlJson?(
+    host: FleetHostConfig,
+    fixedPath: string,
+    body: unknown,
+    timeoutMs?: number,
+  ): Promise<unknown>
   closeHost?(hostId: string): void
   close?(): Promise<void> | void
 }
@@ -89,6 +96,35 @@ function fixedAgentPath(value: string): string {
   return `${parsed.pathname}${parsed.search}`
 }
 
+function fixedControlPath(value: string, method: 'GET' | 'POST'): string {
+  if (!value.startsWith('/agent/control/v1/')) {
+    throw new Error('Remote-session connector accepts only fixed control protocol paths.')
+  }
+  const parsed = new URL(value, 'http://agent.invalid')
+  if (
+    parsed.origin !== 'http://agent.invalid'
+    || parsed.search
+    || parsed.hash
+    || !parsed.pathname.startsWith('/agent/control/v1/')
+  ) {
+    throw new Error('Remote-session connector path is invalid.')
+  }
+  const route = parsed.pathname.slice('/agent/control/v1'.length)
+  const opaqueId = '[^/]+'
+  const allowed = method === 'GET'
+    ? [new RegExp(`^/sessions/${opaqueId}$`)]
+    : [
+        /^\/sessions$/,
+        new RegExp(`^/sessions/${opaqueId}/prompt$`),
+        new RegExp(`^/sessions/${opaqueId}/interrupt$`),
+        new RegExp(`^/sessions/${opaqueId}/permissions/${opaqueId}$`),
+      ]
+  if (!allowed.some((pattern) => pattern.test(route))) {
+    throw new Error('Remote-session connector path is not allowlisted.')
+  }
+  return parsed.pathname
+}
+
 async function boundedBody(response: Response): Promise<string> {
   const declared = Number(response.headers.get('content-length') || 0)
   if (declared > MAX_AGENT_BODY_BYTES) {
@@ -122,26 +158,36 @@ async function requestJson(
   token: string,
   pathName: string,
   timeoutMs: number,
+  method: 'GET' | 'POST' = 'GET',
+  payload?: unknown,
 ): Promise<unknown> {
   let safePath: string
   try {
-    safePath = fixedAgentPath(pathName)
+    safePath = pathName.startsWith('/agent/control/')
+      ? fixedControlPath(pathName, method)
+      : fixedAgentPath(pathName)
   } catch {
     throw new FleetConnectionError(
       'malformed',
-      'Fleet connector rejected a path outside the fixed agent protocol.',
+      'Fleet connector rejected a path outside its fixed protocols.',
     )
+  }
+  const body = payload === undefined ? undefined : JSON.stringify(payload)
+  if (body && Buffer.byteLength(body) > 64 * 1024) {
+    throw new FleetConnectionError('malformed', 'Remote command exceeded the request size limit.')
   }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   timer.unref()
   try {
     const response = await fetch(new URL(safePath, baseUrl), {
-      method: 'GET',
+      method,
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${token}`,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
+      body,
       redirect: 'manual',
       signal: controller.signal,
     })
@@ -151,12 +197,12 @@ async function requestJson(
     if (response.status >= 300 && response.status < 400) {
       throw new FleetConnectionError('malformed', 'Host agent attempted an unsupported redirect.', response.status)
     }
-    const body = await boundedBody(response)
+    const responseBody = await boundedBody(response)
     if (!response.ok) {
       throw new FleetConnectionError('offline', `Host agent returned HTTP ${response.status}.`, response.status)
     }
     try {
-      return JSON.parse(body)
+      return JSON.parse(responseBody)
     } catch {
       throw new FleetConnectionError('malformed', 'Host agent returned malformed JSON.')
     }
@@ -184,6 +230,25 @@ export class DefaultFleetConnector implements FleetConnector {
       : host.baseUrl
     const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt))
     return requestJson(baseUrl, host.token, fixedPath, remainingMs)
+  }
+
+  async getControlJson(
+    host: FleetHostConfig,
+    fixedPath: string,
+    timeoutMs = FLEET_REQUEST_TIMEOUT_MS,
+  ): Promise<unknown> {
+    const { baseUrl, remainingMs } = await this.controlDestination(host, timeoutMs)
+    return requestJson(baseUrl, host.controlToken, fixedPath, remainingMs)
+  }
+
+  async postControlJson(
+    host: FleetHostConfig,
+    fixedPath: string,
+    body: unknown,
+    timeoutMs = FLEET_REQUEST_TIMEOUT_MS,
+  ): Promise<unknown> {
+    const { baseUrl, remainingMs } = await this.controlDestination(host, timeoutMs)
+    return requestJson(baseUrl, host.controlToken, fixedPath, remainingMs, 'POST', body)
   }
 
   closeHost(hostId: string): void {
@@ -248,6 +313,20 @@ export class DefaultFleetConnector implements FleetConnector {
         'offline',
         'The SSH tunnel did not become ready before the timeout.',
       )
+    }
+  }
+
+  private async controlDestination(
+    host: FleetHostConfig,
+    timeoutMs: number,
+  ): Promise<{ baseUrl: string; remainingMs: number }> {
+    const startedAt = Date.now()
+    if (host.transport === 'ssh') await this.ensureSshTunnel(host, timeoutMs)
+    return {
+      baseUrl: host.transport === 'ssh'
+        ? `http://127.0.0.1:${host.localPort}`
+        : host.baseUrl,
+      remainingMs: Math.max(1, timeoutMs - (Date.now() - startedAt)),
     }
   }
 }

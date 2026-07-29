@@ -17,12 +17,15 @@ import {
   normalizeAgentHello,
   normalizeAgentSessionDetail,
   normalizeAgentSnapshot,
+  normalizeRemoteSessionSnapshot,
   normalizeSession,
   normalizeUsageReport,
   stripRemoteWorkflow,
 } from './fleet-protocol.js'
 import { GrokStore } from './grok-store.js'
+import { GrokController } from './grok-controller.js'
 import { LiveMonitor } from './live-monitor.js'
+import { RemoteCommandStore, type RemoteCommandResult } from './remote-command-store.js'
 import { RuntimeInspector } from './runtime-inspector.js'
 import { SessionReader, mergeSessionFeed } from './session-reader.js'
 import { SessionStateStore } from './session-state.js'
@@ -32,6 +35,9 @@ import type {
   AgentHostIdentity,
   AgentSessionDetail,
   AgentSnapshot,
+  RemoteCommandKind,
+  RemoteCommandReceipt,
+  RemoteSessionSnapshot,
   ControlSnapshot,
   UsageGroupDimension,
   UsagePeriod,
@@ -54,6 +60,15 @@ const CAPABILITIES: AgentCapability[] = [
   'usage.report',
 ]
 const SESSION_ID = /^[a-zA-Z0-9._:-]{1,160}$/
+const COMMAND_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/
+
+const CONTROL_CAPABILITIES: AgentCapability[] = [
+  'remote.sessions',
+  'remote.sessions.create',
+  'remote.sessions.prompt',
+  'remote.sessions.interrupt',
+  'remote.permissions.resolve',
+]
 
 function emptyControl(): ControlSnapshot {
   return {
@@ -196,6 +211,16 @@ export interface HostAgentProvider {
   snapshot(): Promise<AgentSnapshot>
   session(id: string): Promise<AgentSessionDetail | null>
   usage(period: UsagePeriod, scope: UsageScope, groupBy: UsageGroupDimension): Promise<UsageReport>
+  remoteSession?(id: string): Promise<RemoteSessionSnapshot | null>
+  createRemoteSession?(input: {
+    cwd: string
+    prompt: string
+    model?: string
+    reasoningEffort?: string
+  }): Promise<string>
+  promptRemoteSession?(id: string, prompt: string): Promise<void>
+  interruptRemoteSession?(id: string): Promise<void>
+  resolveRemotePermission?(sessionId: string, permissionId: string, optionId?: string): Promise<void>
   close?(): Promise<void>
 }
 
@@ -205,27 +230,32 @@ export class LocalHostAgentProvider implements HostAgentProvider {
   private readonly live: LiveMonitor
   private readonly runtime: RuntimeInspector
   private readonly sessionReader: SessionReader
+  private readonly controller: GrokController | null
   private identity: AgentHostIdentity | null = null
   private started = false
 
   constructor(
     private readonly stateDirectory = process.env.GROK_UI_STATE_DIR || path.join(os.homedir(), '.grok-ui'),
     grokHome = process.env.GROK_HOME,
+    private readonly remoteControlEnabled = false,
   ) {
     this.sessionState = new SessionStateStore(this.stateDirectory)
     this.store = new GrokStore(grokHome, this.sessionState)
     this.live = new LiveMonitor(this.store)
     this.runtime = new RuntimeInspector()
     this.sessionReader = new SessionReader(this.store.grokHome)
+    this.controller = remoteControlEnabled ? new GrokController(this.sessionState) : null
   }
 
   async start(): Promise<void> {
     if (this.started) return
     await this.sessionState.load()
+    await this.controller?.restore()
     this.identity = await readIdentity(this.stateDirectory)
-    this.live.on('live', (snapshot) => this.runtime.update(snapshot, emptyControl()))
+    this.live.on('live', (snapshot) => this.runtime.update(snapshot, this.controller?.snapshot() || emptyControl()))
+    this.controller?.on('control', (snapshot) => this.runtime.update(this.live.snapshot(), snapshot))
     await this.live.start()
-    this.runtime.update(this.live.snapshot(), emptyControl())
+    this.runtime.update(this.live.snapshot(), this.controller?.snapshot() || emptyControl())
     await this.runtime.start()
     this.started = true
   }
@@ -242,7 +272,7 @@ export class LocalHostAgentProvider implements HostAgentProvider {
       grokUiVersion: APP_VERSION,
       agentVersion: APP_VERSION,
       grokVersion: dashboard.version,
-      capabilities: [...CAPABILITIES],
+      capabilities: this.capabilities(),
     }
   }
 
@@ -250,7 +280,7 @@ export class LocalHostAgentProvider implements HostAgentProvider {
     await this.start()
     const dashboard = await this.store.dashboard()
     const observationState = await this.readState()
-    const managed = observationState.managedSessions()
+    const managed = this.controller?.snapshot().sessions || observationState.managedSessions()
     const sessionsById = new Map(dashboard.sessions.map((session) => [
       session.id,
       normalizeSession(observationState.apply(session)),
@@ -286,7 +316,8 @@ export class LocalHostAgentProvider implements HostAgentProvider {
       grokUiVersion: APP_VERSION,
       agentVersion: APP_VERSION,
       grokVersion: dashboard.version,
-      capabilities: [...CAPABILITIES],
+      capabilities: this.capabilities(),
+      managedSessionIds: managed.map((session) => session.id).slice(0, MAX_AGENT_SESSIONS),
       health: {
         status: degraded ? 'degraded' : 'healthy',
         detail: degraded ? runtime.error || 'One or more observer capabilities are partial.' : '',
@@ -313,7 +344,10 @@ export class LocalHostAgentProvider implements HostAgentProvider {
     await this.start()
     if (!SESSION_ID.test(id)) return null
     const observationState = await this.readState()
-    const managed = observationState.managedSessions().find((session) => session.id === id) || null
+    const managed = (
+      this.controller?.snapshot().sessions
+      || observationState.managedSessions()
+    ).find((session) => session.id === id) || null
     const live = this.live.snapshot().agents.find((session) => session.id === id) || null
     const recorded = await this.store.session(id)
     const session = recorded
@@ -372,12 +406,91 @@ export class LocalHostAgentProvider implements HostAgentProvider {
     return boundedUsage(new UsageLedger(observationState).reportFromInputs({
       sessions: dashboard.sessions.map((session) => observationState.apply(session)),
       live: this.live.snapshot().agents,
-      managed: observationState.managedSessions(),
+      managed: this.controller?.snapshot().sessions || observationState.managedSessions(),
     }, { period, scope, groupBy }))
   }
 
+  async remoteSession(id: string): Promise<RemoteSessionSnapshot | null> {
+    this.assertRemoteControl()
+    if (!SESSION_ID.test(id) || !this.controller!.hasSession(id)) {
+      throw new Error('Only a host-managed remote session can be controlled.')
+    }
+    const detail = await this.session(id)
+    if (!detail) return null
+    const control = this.controller!.snapshot()
+    const managed = control.sessions.find((session) => session.id === id) || null
+    const permissions = control.permissions.filter((permission) => permission.sessionId === id)
+    const snapshot = normalizeRemoteSessionSnapshot({
+      ...detail,
+      control: managed ? { ...managed, workflows: undefined } : detail.control,
+      permissions,
+      revision: crypto.createHash('sha256').update(JSON.stringify({
+        transcript: detail.transcript.map((item) => [item.id, item.status, item.text]),
+        control: managed ? [
+          managed.updatedAt,
+          managed.state,
+          managed.cancellationStatus,
+          managed.totalTokens,
+        ] : null,
+        permissions: permissions.map((permission) => permission.id),
+      })).digest('base64url'),
+    })
+    return snapshot
+  }
+
+  async createRemoteSession(input: {
+    cwd: string
+    prompt: string
+    model?: string
+    reasoningEffort?: string
+  }): Promise<string> {
+    this.assertRemoteControl()
+    await this.assertObservedWorkspace(input.cwd)
+    const session = await this.controller!.createSession(input)
+    return session.id
+  }
+
+  async promptRemoteSession(id: string, prompt: string): Promise<void> {
+    this.assertRemoteControl()
+    if (!SESSION_ID.test(id) || !this.controller!.hasSession(id)) {
+      throw new Error('Only a host-managed remote session can receive follow-ups.')
+    }
+    const detail = await this.session(id)
+    if (!detail) throw new Error('Remote session was not found.')
+    await this.controller!.promptSession({
+      sessionId: id,
+      cwd: detail.session.cwd,
+      prompt,
+    })
+  }
+
+  async interruptRemoteSession(id: string): Promise<void> {
+    this.assertRemoteControl()
+    if (!SESSION_ID.test(id) || !this.controller!.hasSession(id)) {
+      throw new Error('Only an attached remote session can be interrupted.')
+    }
+    await this.controller!.cancelSession(id)
+  }
+
+  async resolveRemotePermission(
+    sessionId: string,
+    permissionId: string,
+    optionId?: string,
+  ): Promise<void> {
+    this.assertRemoteControl()
+    const permission = this.controller!.snapshot().permissions.find((candidate) =>
+      candidate.id === permissionId && candidate.sessionId === sessionId)
+    if (!permission) throw new Error('Remote permission request is no longer pending.')
+    if (optionId && !permission.options.some((option) => option.id === optionId)) {
+      throw new Error('Remote permission option was not offered by Grok.')
+    }
+    if (!this.controller!.resolvePermission(permissionId, optionId)) {
+      throw new Error('Remote permission request is no longer pending.')
+    }
+  }
+
   async close(): Promise<void> {
-    await Promise.all([this.live.stop(), this.runtime.stop()])
+    await Promise.all([this.live.stop(), this.runtime.stop(), this.controller?.stop()])
   }
 
   private async readState(): Promise<SessionStateStore> {
@@ -385,10 +498,95 @@ export class LocalHostAgentProvider implements HostAgentProvider {
     await state.load()
     return state
   }
+
+  private capabilities(): AgentCapability[] {
+    return this.remoteControlEnabled
+      ? [...CAPABILITIES, ...CONTROL_CAPABILITIES]
+      : [...CAPABILITIES]
+  }
+
+  private assertRemoteControl(): void {
+    if (!this.remoteControlEnabled || !this.controller) {
+      throw new Error('Remote session control is not enabled on this host.')
+    }
+  }
+
+  private async assertObservedWorkspace(cwd: string): Promise<void> {
+    const resolved = path.resolve(cwd)
+    const dashboard = await this.store.dashboard()
+    const observed = new Set([
+      ...dashboard.sessions.map((session) => path.resolve(session.cwd)),
+      ...this.live.snapshot().agents.map((session) => path.resolve(session.cwd)),
+      ...(this.controller?.snapshot().sessions || []).map((session) => path.resolve(session.cwd)),
+    ])
+    if (!observed.has(resolved)) {
+      throw new Error('Remote Start is limited to a workspace already observed on this host.')
+    }
+  }
 }
 
-export function createHostAgentApp(provider: HostAgentProvider, token: string): express.Express {
+interface HostAgentControlOptions {
+  controlToken?: string
+  commandStore?: RemoteCommandStore
+  stateDirectory?: string
+}
+
+function commandId(value: unknown): string {
+  if (typeof value !== 'string' || !COMMAND_ID.test(value)) {
+    throw new Error('A valid commandId is required.')
+  }
+  return value
+}
+
+function commandExpiresAt(value: unknown): string {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    throw new Error('A valid expiresAt is required.')
+  }
+  return value
+}
+
+function commandReceipt(
+  id: string,
+  kind: RemoteCommandKind,
+  sessionId: string,
+  result: RemoteCommandResult,
+): RemoteCommandReceipt {
+  const timestamp = new Date().toISOString()
+  const resultSessionId = result.result && typeof result.result === 'object'
+    && typeof (result.result as { sessionId?: unknown }).sessionId === 'string'
+    ? (result.result as { sessionId: string }).sessionId
+    : sessionId
+  return {
+    commandId: id,
+    kind,
+    status: result.outcome,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    sessionId: resultSessionId,
+    error: result.error || '',
+  }
+}
+
+export function createHostAgentApp(
+  provider: HostAgentProvider,
+  token: string,
+  options: HostAgentControlOptions = {},
+): express.Express {
   if (!token) throw new Error('GROK_UI_AGENT_TOKEN is required for the host agent.')
+  const controlToken = options.controlToken || ''
+  if (controlToken && equalSecret(controlToken, token)) {
+    throw new Error('Remote control must use a token separate from the read-only agent token.')
+  }
+  const commandStore = options.commandStore || (controlToken
+    ? new RemoteCommandStore(
+      options.stateDirectory
+      || process.env.GROK_UI_STATE_DIR
+      || path.join(os.homedir(), '.grok-ui'),
+    )
+    : null)
+  const actorFingerprint = controlToken
+    ? crypto.createHash('sha256').update(controlToken).digest('hex').slice(0, 24)
+    : ''
   const app = express()
   app.disable('x-powered-by')
   app.use((_request, response, next) => {
@@ -407,6 +605,25 @@ export function createHostAgentApp(provider: HostAgentProvider, token: string): 
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       response.status(405).setHeader('Allow', 'GET, HEAD').json({ error: 'Host agent is read-only.' })
+      return
+    }
+    next()
+  })
+  app.use('/agent/control/v1', express.json({ limit: '64kb' }), (request, response, next) => {
+    if (!controlToken || !commandStore) {
+      response.status(404).json({ error: 'Remote session control is not enabled on this host.' })
+      return
+    }
+    const authorization = request.headers.authorization || ''
+    const candidate = authorization.startsWith('Bearer ') ? authorization.slice(7) : ''
+    if (!candidate || !equalSecret(candidate, controlToken)) {
+      response.status(401).json({ error: 'Remote-control authentication required.' })
+      return
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'POST') {
+      response.status(405).setHeader('Allow', 'GET, HEAD, POST').json({
+        error: 'Remote-control method is not supported.',
+      })
       return
     }
     next()
@@ -461,16 +678,147 @@ export function createHostAgentApp(provider: HostAgentProvider, token: string): 
       next(error)
     }
   })
+  app.get('/agent/control/v1/sessions/:id', async (request, response, next) => {
+    try {
+      if (!provider.remoteSession) throw new Error('Remote sessions are unavailable.')
+      const session = await provider.remoteSession(request.params.id)
+      if (!session) {
+        response.status(404).json({ error: 'Remote session was not found.' })
+        return
+      }
+      response.json(normalizeRemoteSessionSnapshot(session))
+    } catch (error) {
+      next(error)
+    }
+  })
+  app.post('/agent/control/v1/sessions', async (request, response, next) => {
+    try {
+      if (!provider.createRemoteSession || !commandStore) throw new Error('Remote Start is unavailable.')
+      const id = commandId(request.body?.commandId)
+      const expiresAt = commandExpiresAt(request.body?.expiresAt)
+      const cwd = typeof request.body?.cwd === 'string' ? request.body.cwd : ''
+      const prompt = typeof request.body?.prompt === 'string' ? request.body.prompt : ''
+      const model = typeof request.body?.model === 'string' ? request.body.model : ''
+      const reasoningEffort = typeof request.body?.reasoningEffort === 'string'
+        ? request.body.reasoningEffort
+        : ''
+      const result = await commandStore.execute({
+        commandId: id,
+        kind: 'session.create',
+        target: 'new-session',
+        actorFingerprint,
+        expiresAt,
+        payload: { cwd, prompt, model, reasoningEffort },
+      }, async () => ({
+        sessionId: await provider.createRemoteSession!({ cwd, prompt, model, reasoningEffort }),
+      }))
+      response.status(202).json(commandReceipt(id, 'session.create', '', result))
+    } catch (error) {
+      next(error)
+    }
+  })
+  app.post('/agent/control/v1/sessions/:id/prompt', async (request, response, next) => {
+    try {
+      if (!provider.promptRemoteSession || !commandStore) throw new Error('Remote follow-up is unavailable.')
+      const id = commandId(request.body?.commandId)
+      const expiresAt = commandExpiresAt(request.body?.expiresAt)
+      const prompt = typeof request.body?.prompt === 'string' ? request.body.prompt : ''
+      const result = await commandStore.execute({
+        commandId: id,
+        kind: 'session.prompt',
+        target: request.params.id,
+        actorFingerprint,
+        expiresAt,
+        payload: { sessionId: request.params.id, prompt },
+      }, async () => {
+        await provider.promptRemoteSession!(request.params.id, prompt)
+        return { sessionId: request.params.id }
+      })
+      response.status(202).json(commandReceipt(id, 'session.prompt', request.params.id, result))
+    } catch (error) {
+      next(error)
+    }
+  })
+  app.post('/agent/control/v1/sessions/:id/interrupt', async (request, response, next) => {
+    try {
+      if (!provider.interruptRemoteSession || !commandStore) throw new Error('Remote interrupt is unavailable.')
+      const id = commandId(request.body?.commandId)
+      const expiresAt = commandExpiresAt(request.body?.expiresAt)
+      const result = await commandStore.execute({
+        commandId: id,
+        kind: 'session.interrupt',
+        target: request.params.id,
+        actorFingerprint,
+        expiresAt,
+        payload: { sessionId: request.params.id },
+      }, async () => {
+        await provider.interruptRemoteSession!(request.params.id)
+        return { sessionId: request.params.id }
+      })
+      response.status(202).json(commandReceipt(id, 'session.interrupt', request.params.id, result))
+    } catch (error) {
+      next(error)
+    }
+  })
+  app.post(
+    '/agent/control/v1/sessions/:id/permissions/:permissionId',
+    async (request, response, next) => {
+      try {
+        if (!provider.resolveRemotePermission || !commandStore) {
+          throw new Error('Remote permission decisions are unavailable.')
+        }
+        const id = commandId(request.body?.commandId)
+        const expiresAt = commandExpiresAt(request.body?.expiresAt)
+        const optionId = typeof request.body?.optionId === 'string'
+          ? request.body.optionId
+          : undefined
+        const result = await commandStore.execute({
+          commandId: id,
+          kind: 'permission.resolve',
+          target: request.params.id,
+          actorFingerprint,
+          expiresAt,
+          payload: {
+            sessionId: request.params.id,
+            permissionId: request.params.permissionId,
+            optionId: optionId || '',
+          },
+        }, async () => {
+          await provider.resolveRemotePermission!(
+            request.params.id,
+            request.params.permissionId,
+            optionId,
+          )
+          return { sessionId: request.params.id }
+        })
+        response.status(202).json(commandReceipt(
+          id,
+          'permission.resolve',
+          request.params.id,
+          result,
+        ))
+      } catch (error) {
+        next(error)
+      }
+    },
+  )
+  app.use('/agent/control/v1', (_request, response) => {
+    response.status(404).json({ error: 'Unknown remote-control route.' })
+  })
   app.use('/agent/v1', (_request, response) => {
     response.status(404).json({ error: 'Unknown host-agent route.' })
   })
   app.use((
-    _error: unknown,
+    error: unknown,
     _request: express.Request,
     response: express.Response,
     _next: express.NextFunction,
   ) => {
-    response.status(503).json({ error: 'Host-agent observation is temporarily unavailable.' })
+    response.status(503).json({
+      error: process.env.GROK_UI_E2E === '1' && error instanceof Error
+        ? error.message
+        : 'Host-agent observation is temporarily unavailable.',
+    })
   })
   return app
 }
@@ -479,10 +827,19 @@ export async function startHostAgent(input: {
   host: string
   port: number
   token: string
+  controlToken?: string
+  stateDirectory?: string
   provider?: HostAgentProvider
 }): Promise<{ server: Server; url: string; close: () => Promise<void> }> {
-  const provider = input.provider || new LocalHostAgentProvider()
-  const app = createHostAgentApp(provider, input.token)
+  const provider = input.provider || new LocalHostAgentProvider(
+    input.stateDirectory,
+    process.env.GROK_HOME,
+    Boolean(input.controlToken),
+  )
+  const app = createHostAgentApp(provider, input.token, {
+    controlToken: input.controlToken,
+    stateDirectory: input.stateDirectory,
+  })
   const server = await new Promise<Server>((resolve, reject) => {
     const listener = app.listen(input.port, input.host, () => resolve(listener))
     listener.once('error', reject)

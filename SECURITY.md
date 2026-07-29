@@ -61,6 +61,47 @@ atomically to `fleet.json` in the Grok UI state directory. The directory and
 file use user-only permissions. Do not copy this file into issue reports,
 support bundles, or shared repositories.
 
+## Secure remote sessions
+
+v0.11 adds an optional control plane beside the v0.10 read-only monitoring
+plane. It is disabled unless the host has a
+`GROK_UI_AGENT_CONTROL_TOKEN` and the central Fleet entry has both the matching
+token and Remote Sessions enabled.
+
+- The control token must be different from `GROK_UI_AGENT_TOKEN`. Monitoring
+  credentials cannot call control routes, and control credentials are not
+  accepted by monitoring routes.
+- Keep both credentials server-side. They are excluded from Fleet API
+  responses, SSE data, browser state, and public configuration.
+- Prefer a private Tailscale network or loopback SSH forwarding. Tailscale
+  provides reachability, not application authorization; both agent
+  authentication layers still apply.
+- The connector accepts only documented `/agent/control/v1/` session routes,
+  rejects redirects, limits requests to 64 KiB and responses to 2 MiB, and uses
+  the same bounded timeout and global connection concurrency as monitoring.
+- Remote Start is restricted to workspaces already observed on that host.
+  There is no arbitrary shell, arbitrary fetch, raw file-write, privilege
+  escalation, or generic command endpoint.
+- The host is the final authority. It may deny a command or omit any remote
+  capability. Permission decisions must match a request and option currently
+  advertised by Grok.
+- The central server refuses mutation unless the host is enabled, compatible,
+  healthy, fresh, and advertising the exact action capability. This check is
+  server-side and does not rely on a browser button being disabled.
+- Each mutation uses a durable command ID and payload fingerprint. An ambiguous
+  operation after host restart becomes `unknown` and is reconciled; it is never
+  replayed automatically. Commands carry a bounded expiry, and an expired
+  delivery is rejected rather than treated as new after retention compaction.
+- Existing CLI-observed sessions remain read-only. Follow-up, permission, and
+  interruption routes accept only sessions already owned by the host's managed
+  ACP controller.
+
+The host stores bounded command and audit evidence in
+`remote-commands.json` under the private Grok UI state directory. Records
+contain command metadata, token fingerprints, timestamps, and outcomes—not
+prompts, transcripts, credentials, or raw provider error messages. Do not
+include this file in routine support bundles.
+
 ## Trust boundary
 
 The browser never receives Grok credentials. The server owns the local ACP connection and passes explicit permission decisions back to Grok. A valid Grok UI token grants access to that control surface, so it must be protected like a developer credential.
@@ -70,6 +111,10 @@ authenticates each configured agent, bounds every remote read, isolates one
 host's failure from the rest of the fleet, and reports compatibility and
 freshness rather than silently presenting old data as current. Agent
 credentials never cross that browser boundary.
+
+For remote sessions, the local host agent also remains the ACP authority. The
+central server carries constrained intent; it does not gain a remote shell or
+the ability to invent permission options.
 
 Privacy Mode is a presentation safeguard for recordings, demos, and screen
 sharing. It replaces sensitive values in rendered views but does not redact API

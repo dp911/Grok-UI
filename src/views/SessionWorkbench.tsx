@@ -32,6 +32,7 @@ import {
 } from '../api'
 import type {
   ControlSnapshot,
+  ControlPermission,
   LiveFeedItem,
   LiveSnapshot,
   SessionRow,
@@ -365,7 +366,7 @@ export function SessionWorkbench({
           {loading && !data ? (
             <div className="workbench-loading"><LoaderCircle size={25} className="is-spinning" /><span>Assembling session record…</span></div>
           ) : tab === 'timeline' ? (
-            <Timeline
+            <SessionTimeline
               items={transcript}
               permissions={data?.permissions || []}
               feedRef={feedRef}
@@ -411,14 +412,14 @@ export function SessionWorkbench({
   )
 }
 
-function Timeline({
+export function SessionTimeline({
   items,
   permissions,
   feedRef,
   onDecide,
 }: {
   items: LiveFeedItem[]
-  permissions: SessionWorkbenchData['permissions']
+  permissions: ControlPermission[]
   feedRef: React.RefObject<HTMLDivElement | null>
   onDecide: (permissionId: string, optionId?: string) => Promise<void>
 }) {

@@ -51,12 +51,31 @@ The protocol, security constraints, verification matrix, and approval-gated
 release plan are tracked in
 [`v0.10-multi-machine-monitoring.md`](./v0.10-multi-machine-monitoring.md).
 
-## v0.11 — Secure remote control
+## v0.11 — Secure remote sessions
 
-- Start, pause, resume, interrupt, and stop remote work.
-- Make remote commands idempotent and reconnection-safe.
-- Add destructive-action confirmation, per-host authorization, and an audit
-  trail.
+- Start a Grok session on an explicitly authorized host, then continue the same
+  live conversation from another device.
+- Stream assistant, reasoning, tool, status, and permission updates into a
+  focused remote session console.
+- Send follow-up prompts, choose only permission options advertised by Grok,
+  and interrupt the active turn.
+- Keep monitoring credentials read-only. Remote sessions require a second,
+  per-host control credential and explicit opt-in on both the host and central
+  Fleet registry.
+- Make every mutation idempotent and reconnect-safe. The host records command
+  acceptance before execution, never silently replays an ambiguous command
+  after restart, and keeps a bounded private audit trail.
+- Refuse control while a host is unhealthy, stale, incompatible, disabled, or
+  missing the exact negotiated capability.
+
+Remote workflow Pause, Resume, and Stop, arbitrary remote shell execution, team
+roles, shared approvals, and organization-wide policy are not part of the first
+v0.11 slice. Those features should build on the session-control evidence rather
+than widening the initial trust boundary.
+
+The product contract, failure behavior, security boundaries, and staged
+acceptance matrix are tracked in
+[`v0.11-secure-remote-sessions.md`](./v0.11-secure-remote-sessions.md).
 
 ## v0.12 — VS Code
 

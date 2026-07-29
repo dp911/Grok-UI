@@ -1,17 +1,49 @@
-import { Activity, AlertTriangle, ChevronRight, LoaderCircle, X } from 'lucide-react'
-import { useState } from 'react'
-import { getFleetSessionDetail } from '../../../api'
+import { Activity, AlertTriangle, ChevronRight, LoaderCircle, MessageSquare, Play, X } from 'lucide-react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { getFleetSessionDetail, startRemoteSession } from '../../../api'
 import { usePrivacy } from '../../../privacy'
 import type { AgentSessionDetail, FleetHostView, SessionRow } from '../../../types'
 import { FleetPanelEmpty, SectionState } from '../SectionState'
 import { elapsedLabel, exactTime, integer, sessions } from '../model'
 
-export function FleetSessions({ host }: { host: FleetHostView }) {
+interface PendingCommand {
+  commandId: string
+  expiresAt: string
+}
+
+function newCommand(): PendingCommand {
+  const commandId = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `remote-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return { commandId, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() }
+}
+
+export function FleetSessions({
+  host,
+  onOpenRemoteSession,
+}: {
+  host: FleetHostView
+  onOpenRemoteSession: (host: FleetHostView, session: SessionRow) => void
+}) {
   const privacy = usePrivacy()
   const observed = sessions(host)
   const [detail, setDetail] = useState<AgentSessionDetail | null>(null)
   const [loadingId, setLoadingId] = useState('')
   const [error, setError] = useState('')
+  const [startPrompt, setStartPrompt] = useState('')
+  const [startWorkspace, setStartWorkspace] = useState('')
+  const [starting, setStarting] = useState(false)
+  const startCommand = useRef<PendingCommand | null>(null)
+  const workspaces = useMemo(() => [...new Map(
+    observed.filter((session) => session.cwd).map((session) => [session.cwd, session.workspace || session.cwd]),
+  )], [observed])
+  const canControl = host.status === 'healthy'
+    && host.freshness === 'fresh'
+    && host.config.controlEnabled
+    && host.config.hasControlToken
+    && host.capabilities.includes('remote.sessions')
+  const canStart = canControl && host.capabilities.includes('remote.sessions.create') && workspaces.length > 0
+  const managedSessionIds = new Set(host.snapshot?.managedSessionIds || [])
 
   const inspect = async (session: SessionRow) => {
     setLoadingId(session.id)
@@ -25,10 +57,82 @@ export function FleetSessions({ host }: { host: FleetHostView }) {
     }
   }
 
+  const start = async (event: FormEvent) => {
+    event.preventDefault()
+    const cwd = startWorkspace || workspaces[0]?.[0] || ''
+    if (!cwd || !startPrompt.trim()) return
+    const command = startCommand.current || newCommand()
+    startCommand.current = command
+    setStarting(true)
+    setError('')
+    try {
+      const receipt = await startRemoteSession(host.id, {
+        ...command,
+        cwd,
+        prompt: startPrompt.trim(),
+      })
+      if (!receipt.sessionId) throw new Error('The remote host did not identify the new session.')
+      startCommand.current = null
+      const template = observed.find((session) => session.cwd === cwd) || observed[0]!
+      onOpenRemoteSession(host, {
+        ...template,
+        id: receipt.sessionId,
+        title: startPrompt.trim().replace(/\s+/g, ' ').slice(0, 80),
+        cwd,
+        workspace: workspaces.find(([path]) => path === cwd)?.[1] || cwd,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'live',
+      })
+      setStartPrompt('')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to start remote work.')
+    } finally {
+      setStarting(false)
+    }
+  }
+
   return (
     <SectionState host={host} section="sessions">
       {observed.length ? (
         <>
+          {canStart && (
+            <form className="fleet-remote-start" onSubmit={start}>
+              <div>
+                <span>START SECURE REMOTE SESSION</span>
+                <strong>Launch Grok in an already observed workspace.</strong>
+              </div>
+              <select
+                aria-label="Remote workspace"
+                value={startWorkspace || workspaces[0]?.[0] || ''}
+                onChange={(event) => {
+                  setStartWorkspace(event.target.value)
+                  startCommand.current = null
+                }}
+              >
+                {workspaces.map(([cwd, label]) => <option value={cwd} key={cwd}>{privacy.workspace(label)}</option>)}
+              </select>
+              <input
+                aria-label="Remote task"
+                value={startPrompt}
+                maxLength={32_000}
+                placeholder="What should Grok work on?"
+                onChange={(event) => {
+                  setStartPrompt(event.target.value)
+                  startCommand.current = null
+                }}
+              />
+              <button disabled={starting || !startPrompt.trim()}>
+                {starting ? <LoaderCircle className="is-spinning" size={14} /> : <Play size={14} />}
+                Start
+              </button>
+            </form>
+          )}
+          {!canControl && host.config.controlEnabled && (
+            <div className="fleet-partial-note">
+              <AlertTriangle size={14} /> Remote controls require a fresh, healthy host and negotiated control capability.
+            </div>
+          )}
           {error && <div className="fleet-partial-note" role="alert"><AlertTriangle size={14} /> {privacy.content(error)}</div>}
           <div className="fleet-table-wrap">
             <table className="fleet-table fleet-session-table">
@@ -44,15 +148,27 @@ export function FleetSessions({ host }: { host: FleetHostView }) {
                     <td>{integer.format(session.turns)}</td>
                     <td title={exactTime(session.updatedAt)}>{elapsedLabel(session.updatedAt)}</td>
                     <td>
-                      <button
-                        className="fleet-inspect-session"
-                        type="button"
-                        onClick={() => void inspect(session)}
-                        disabled={loadingId === session.id}
-                        aria-label={`Inspect read-only session ${privacy.sessionTitle(session.title, `${host.id}:${session.id}`)}`}
-                      >
-                        {loadingId === session.id ? <LoaderCircle className="is-spinning" size={13} /> : <ChevronRight size={13} />}
-                      </button>
+                      <span className="fleet-session-actions">
+                        {canControl && managedSessionIds.has(session.id) && (
+                          <button
+                            className="fleet-open-remote-session"
+                            type="button"
+                            onClick={() => onOpenRemoteSession(host, session)}
+                            aria-label={`Continue remote session ${privacy.sessionTitle(session.title, `${host.id}:${session.id}`)}`}
+                          >
+                            <MessageSquare size={13} />
+                          </button>
+                        )}
+                        <button
+                          className="fleet-inspect-session"
+                          type="button"
+                          onClick={() => void inspect(session)}
+                          disabled={loadingId === session.id}
+                          aria-label={`Inspect read-only session ${privacy.sessionTitle(session.title, `${host.id}:${session.id}`)}`}
+                        >
+                          {loadingId === session.id ? <LoaderCircle className="is-spinning" size={13} /> : <ChevronRight size={13} />}
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))}

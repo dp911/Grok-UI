@@ -637,7 +637,9 @@
 .fleet-session-state i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .fleet-session-state.state-live { color: var(--lime); }
 .fleet-session-state.state-attention { color: var(--coral); }
+.fleet-session-actions { display: inline-flex; align-items: center; gap: 5px; }
 .fleet-inspect-session,
+.fleet-open-remote-session,
 .fleet-session-detail > header > button {
   width: 29px;
   height: 29px;
@@ -649,7 +651,51 @@
   cursor: pointer;
 }
 .fleet-inspect-session:hover,
+.fleet-open-remote-session:hover,
 .fleet-session-detail > header > button:hover { color: var(--paper); border-color: var(--line-strong); }
+.fleet-open-remote-session { color: var(--lime); border-color: color-mix(in srgb, var(--lime) 35%, transparent); }
+.fleet-remote-start {
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(190px, .8fr) minmax(180px, .7fr) minmax(240px, 1.4fr) auto;
+  align-items: end;
+  gap: 9px;
+  border-bottom: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--lime) 4%, transparent);
+}
+.fleet-remote-start > div { display: grid; gap: 5px; }
+.fleet-remote-start > div span { color: var(--lime); font-size: var(--type-label); letter-spacing: .12em; }
+.fleet-remote-start > div strong { color: var(--paper); font-size: var(--type-meta); font-weight: 500; }
+.fleet-remote-start select,
+.fleet-remote-start input {
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  color: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  outline: none;
+  background: var(--panel);
+  font: inherit;
+  font-size: var(--type-meta);
+}
+.fleet-remote-start select:focus,
+.fleet-remote-start input:focus { border-color: var(--lime); }
+.fleet-remote-start button {
+  height: 38px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--ink);
+  border: 1px solid var(--lime);
+  background: var(--lime);
+  font-size: var(--type-meta);
+  font-weight: 700;
+  cursor: pointer;
+}
+.fleet-remote-start button:disabled { opacity: .45; cursor: not-allowed; }
 .fleet-session-detail { border-top: 1px solid var(--line-strong); }
 .fleet-session-detail > header {
   min-height: 70px;
@@ -928,6 +974,8 @@
   .fleet-status-narrative > div:first-child { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line); }
   .fleet-run-grid { grid-template-columns: 1fr; }
   .fleet-run-card { border-right: 0; }
+  .fleet-remote-start { grid-template-columns: 1fr 1fr; }
+  .fleet-remote-start > div { grid-column: 1 / -1; }
 }
 
 @media (max-width: 680px) {
@@ -964,6 +1012,8 @@
   .fleet-usage-summary { grid-template-columns: 1fr; }
   .fleet-usage-summary > div { min-height: 73px; border-right: 0; border-bottom: 1px solid var(--line); }
   .fleet-table { min-width: 720px; }
+  .fleet-remote-start { grid-template-columns: 1fr; align-items: stretch; }
+  .fleet-remote-start > div { grid-column: auto; }
   .fleet-run-card dl { grid-template-columns: 1fr; }
   .fleet-run-card dl > div { border-right: 0; border-bottom: 1px solid var(--line); }
   .fleet-run-card dl > div:last-child { border-bottom: 0; }

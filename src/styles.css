@@ -5289,6 +5289,24 @@ kbd {
   background: var(--coral-soft) !important;
 }
 
+.remote-stream-state {
+  min-height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  font-size: var(--type-label);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.remote-stream-state.is-live {
+  color: var(--lime);
+  border-color: color-mix(in srgb, var(--lime) 35%, transparent);
+}
+
 .workbench-instruments {
   min-height: 68px;
   display: grid;

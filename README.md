@@ -87,12 +87,14 @@ reports that the current process can resume them.
 <tr>
 <td colspan="2" valign="top">
 
-**◎ Read-only multi-machine monitoring**
+**◎ Secure remote sessions**
 
 Register trusted Grok UI host agents over managed SSH forwarding or a private
 Tailscale network. The Fleet view shows identity, versions, capabilities,
-health, latency, last seen, freshness, and bounded remote sessions, workflows,
-runtime state, and usage—without adding remote controls.
+health, latency, last seen, freshness, and bounded telemetry. With a separate
+per-host control grant, start a managed Grok session and continue the same live
+conversation from another device, including follow-ups, Grok permission
+choices, and interruption.
 
 </td>
 </tr>
@@ -108,9 +110,10 @@ runtime state, and usage—without adding remote controls.
 
 Grok UI runs as one local Express supervisor. The browser receives runtime,
 control, dashboard, workspace, and fleet events over SSE; commands return
-through authenticated API routes. Optional host agents reuse the same bounded
-local projections and expose a separate authenticated, read-only protocol.
-Grok credentials and host-agent tokens never enter the browser.
+through authenticated API routes. Optional host agents keep monitoring on an
+authenticated read-only protocol and expose remote sessions only through a
+second, explicitly enabled control credential. Grok credentials and host-agent
+tokens never enter the browser.
 
 ## Quickstart
 
@@ -147,6 +150,22 @@ The agent always requires its own token, including on loopback, and defaults to
 `agent` when that machine needs an override. The central Fleet view stores the
 matching token server-side when you register the host.
 
+To opt that host into secure remote sessions, provide a second, different
+token:
+
+```bash
+GROK_UI_AGENT_TOKEN='<monitoring-token>' \
+GROK_UI_AGENT_CONTROL_TOKEN='<different-control-token>' \
+npx --yes grok-ui agent
+```
+
+In the central Fleet editor, enter the same control token and enable Remote
+Sessions for that host. A healthy, fresh host can then start Grok in a workspace
+it has already observed. The Remote Session Console streams the conversation,
+accepts natural-language follow-ups, presents Grok's exact permission choices,
+and can interrupt the current turn. It is not a remote terminal and exposes no
+arbitrary shell.
+
 ### Run from source
 
 ```bash
@@ -172,7 +191,7 @@ first session yet. Machine-specific paths are never included in those checks.
 | Option | Purpose |
 | --- | --- |
 | `doctor` | Check Node, Grok CLI, authentication, and local state |
-| `agent` | Start the authenticated read-only host agent |
+| `agent` | Start the authenticated host agent; remote sessions are opt-in |
 | `--port <number>` | Override dashboard port `4310` or agent port `4311` |
 | `--host <address>` | Override the loopback bind address |
 | `--grok-home <path>` | Use a specific Grok state directory |
@@ -286,6 +305,26 @@ shell, write files, or probe arbitrary endpoints. Registering, editing,
 refreshing, or removing a host changes only the central monitor configuration
 or triggers a read.
 
+## Secure remote sessions
+
+v0.11 keeps all v0.10 monitoring routes read-only and adds a separate,
+host-authorized control channel. It lets a user start or continue a real
+ACP-managed Grok conversation from another device, send follow-ups, answer
+Grok's permission requests, and interrupt a running turn.
+
+Every mutation carries a durable command ID and bounded delivery expiry.
+Retrying the same delivery cannot silently create duplicate work, and a host
+restart turns an ambiguous command into an explicit reconciliation state
+instead of replaying it. Existing CLI-observed sessions remain read-only;
+follow-up control is limited to host-managed sessions. Controls remain
+unavailable while the host is stale, unhealthy, incompatible, disabled, or
+missing the exact capability.
+
+The initial scope does not add arbitrary shell access, remote workflow
+Pause/Resume/Stop, team roles, or shared approvals. See
+[`docs/v0.11-secure-remote-sessions.md`](docs/v0.11-secure-remote-sessions.md)
+for the product contract and staged decisions.
+
 ## Themes
 
 Two complete visual systems ship with the dashboard:
@@ -339,6 +378,7 @@ See [SECURITY.md](SECURITY.md) for the full deployment and reporting guidance.
 | `GROK_UI_TOKEN` | empty | Required for non-loopback binding |
 | `GROK_UI_STATE_DIR` | `~/.grok-ui` | Private annotations and managed-session state |
 | `GROK_UI_AGENT_TOKEN` | empty | Required dedicated bearer token for host-agent mode |
+| `GROK_UI_AGENT_CONTROL_TOKEN` | empty | Optional, distinct token that enables secure remote sessions on the host |
 | `GROK_UI_AGENT_HOST` | `127.0.0.1` | Host-agent bind interface |
 | `GROK_UI_AGENT_PORT` | `4311` | Host-agent port |
 | `GROK_UI_AGENT_LABEL` | system hostname | Optional host label advertised by the agent |
@@ -357,7 +397,7 @@ npm run verify    # Check, test, and build
 npm run release:check # Audit the exact package contents
 npm run test:package  # Install and launch the packed artifact in isolation
 npm start         # Build when needed, then serve the production app
-npm run agent     # Serve the built read-only host agent
+npm run agent     # Serve the built host agent; control remains opt-in
 npm run serve     # Serve an existing production build without rebuilding
 ```
 
@@ -370,7 +410,8 @@ server/
   live-monitor.ts         active process and runtime event projection
   usage-ledger.ts         provenance-aware durable usage reporting
   session-projection.ts   shared local session-to-row projection
-  host-agent.ts           authenticated read-only host protocol
+  host-agent.ts           read-only monitoring and opt-in session control
+  remote-command-store.ts durable command reconciliation and audit evidence
   fleet-protocol.ts       versioned parsing, caps, and host namespacing
   fleet-registry.ts       atomic private connection registry
   fleet-connectors.ts     bounded direct, Tailscale, and SSH transports
@@ -389,6 +430,8 @@ src/
   views/ChangesView.tsx   live repository change workbench
   views/SessionWorkbench.tsx
                             session timeline and operations
+  views/RemoteSessionWorkbench.tsx
+                            live remote conversation and safe controls
   App.tsx                 dashboard shell and event-stream client
   styles/fleet.css        Fleet-only presentation
 ```

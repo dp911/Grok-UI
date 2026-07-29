@@ -214,7 +214,33 @@ function provider({ id, label, degraded = false, incompatible = false, controlle
     'workflows.list',
     'runtime.snapshot',
     'usage.report',
+    ...(controlled ? [
+      'remote.sessions',
+      'remote.sessions.create',
+      'remote.sessions.prompt',
+      'remote.sessions.interrupt',
+      'remote.permissions.resolve',
+    ] : []),
   ]
+  const remoteTranscript = [{
+    id: 'remote-transcript-1',
+    type: 'assistant',
+    title: 'Remote response',
+    text: 'Remote transcript for Example Operator at 100.64.0.9',
+    status: 'completed',
+    timestamp: timestamp(),
+  }]
+  let remoteState = 'idle'
+  let remoteUpdatedAt = timestamp()
+  let remotePermissions = controlled ? [{
+    id: 'remote-permission-1',
+    sessionId: 'remote-session-1',
+    title: 'Allow the remote verification tool?',
+    toolKind: 'execute',
+    toolCallId: 'remote-tool-1',
+    createdAt: timestamp(),
+    options: [{ id: 'allow-once', name: 'Allow once', kind: 'allow_once' }],
+  }] : []
   async function online() {
     if (controlled && await healthyMode() === 'offline') {
       throw new Error('Simulated host disconnect.')
@@ -242,6 +268,7 @@ function provider({ id, label, degraded = false, incompatible = false, controlle
       return {
         ...(await hello()),
         protocolVersion: incompatible ? 9 : 1,
+        managedSessionIds: controlled ? ['remote-session-1'] : [],
         health: {
           status: degraded ? 'degraded' : 'healthy',
           detail: degraded ? 'Runtime observer is partial.' : '',
@@ -267,14 +294,7 @@ function provider({ id, label, degraded = false, incompatible = false, controlle
         generatedAt: timestamp(),
         hostId: id,
         session: current,
-        transcript: [{
-          id: 'remote-transcript-1',
-          type: 'assistant',
-          title: 'Remote response',
-          text: 'Remote transcript for Example Operator at 100.64.0.9',
-          status: 'completed',
-          timestamp: timestamp(),
-        }],
+        transcript: remoteTranscript,
         live: null,
         control: null,
         workflows: [workflow()],
@@ -285,6 +305,72 @@ function provider({ id, label, degraded = false, incompatible = false, controlle
       await online()
       return usage()
     },
+    async remoteSession() {
+      await online()
+      const detail = await this.session()
+      return {
+        ...detail,
+        revision: `${remoteUpdatedAt}:${remoteTranscript.length}:${remotePermissions.length}:${remoteState}`,
+        control: {
+          id: 'remote-session-1',
+          cwd: '/remote/secret-phoenix',
+          title: 'Remote Confidential Phoenix',
+          model: 'grok-fleet-e2e',
+          state: remoteState,
+          createdAt: remoteUpdatedAt,
+          updatedAt: remoteUpdatedAt,
+          lastPrompt: '',
+          stopReason: remoteState === 'cancelled' ? 'cancelled' : '',
+          error: '',
+          cancellationStatus: remoteState === 'cancelled' ? 'confirmed' : 'none',
+          cancelRequestedAt: '',
+          cancelledAt: remoteState === 'cancelled' ? remoteUpdatedAt : '',
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          tokenTelemetryAvailable: false,
+          costAmount: 0,
+          costCurrency: '',
+          costTelemetryAvailable: false,
+          feed: [],
+        },
+        permissions: remotePermissions,
+        managed: true,
+      }
+    },
+    async promptRemoteSession(_sessionId, prompt) {
+      remoteState = 'working'
+      remoteUpdatedAt = timestamp()
+      remoteTranscript.push({
+        id: `remote-user-${remoteTranscript.length}`,
+        type: 'user',
+        title: 'Remote follow-up',
+        text: prompt,
+        status: 'completed',
+        timestamp: remoteUpdatedAt,
+      }, {
+        id: `remote-assistant-${remoteTranscript.length + 1}`,
+        type: 'assistant',
+        title: 'Grok',
+        text: `Remote host accepted: ${prompt}`,
+        status: 'streaming',
+        timestamp: remoteUpdatedAt,
+      })
+    },
+    async interruptRemoteSession() {
+      remoteState = 'cancelled'
+      remoteUpdatedAt = timestamp()
+    },
+    async resolveRemotePermission(_sessionId, permissionId, optionId) {
+      if (permissionId !== 'remote-permission-1' || optionId !== 'allow-once') {
+        throw new Error('Unexpected remote permission decision.')
+      }
+      remotePermissions = []
+      remoteUpdatedAt = timestamp()
+    },
+    async createRemoteSession() {
+      return 'remote-session-1'
+    },
   }
 }
 
@@ -292,6 +378,8 @@ const healthyAgent = await startHostAgent({
   host: '127.0.0.1',
   port: 0,
   token: 'healthy-agent-token',
+  controlToken: 'healthy-control-token',
+  stateDirectory: path.join(fixtureRoot, 'healthy-agent-state'),
   provider: provider({
     id: 'healthy-agent',
     label: 'Healthy Secret Workstation',
@@ -326,7 +414,11 @@ await fs.writeFile(path.join(fixtureRoot, 'fixture.json'), JSON.stringify({
   workspace,
   fleetControlFile,
   fleetHosts: {
-    healthy: { url: healthyAgent.url, token: 'healthy-agent-token' },
+    healthy: {
+      url: healthyAgent.url,
+      token: 'healthy-agent-token',
+      controlToken: 'healthy-control-token',
+    },
     degraded: { url: degradedAgent.url, token: 'degraded-agent-token' },
     incompatible: { url: incompatibleAgent.url, token: 'incompatible-agent-token' },
     unauthorized: { url: healthyAgent.url, token: 'intentionally-wrong-token' },

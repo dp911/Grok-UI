@@ -22,6 +22,8 @@ export interface FleetHostInput {
   transport?: unknown
   baseUrl?: unknown
   token?: unknown
+  controlToken?: unknown
+  controlEnabled?: unknown
   sshTarget?: unknown
   sshPort?: unknown
   localPort?: unknown
@@ -112,6 +114,18 @@ function normalizedHost(
     ? previous.token
     : cleanText(input.token, 4_096)
   if (!token) throw new Error('A dedicated host-agent token is required.')
+  const controlToken = input.controlToken === undefined && previous
+    ? previous.controlToken
+    : cleanText(input.controlToken, 4_096)
+  const controlEnabled = input.controlEnabled === undefined
+    ? previous?.controlEnabled === true
+    : input.controlEnabled === true
+  if (controlEnabled && !controlToken) {
+    throw new Error('A separate remote-control token is required when remote sessions are enabled.')
+  }
+  if (controlEnabled && controlToken === token) {
+    throw new Error('Remote control must use a token separate from the read-only agent token.')
+  }
 
   let baseUrl = ''
   let sshTarget = ''
@@ -138,6 +152,8 @@ function normalizedHost(
     transport: kind,
     baseUrl,
     token,
+    controlToken,
+    controlEnabled,
     sshTarget,
     sshPort,
     localPort,
@@ -159,6 +175,8 @@ function normalizePersistedHost(value: unknown): FleetHostConfig | null {
       transport: item.transport,
       baseUrl: item.baseUrl,
       token: item.token,
+      controlToken: item.controlToken,
+      controlEnabled: item.controlEnabled,
       sshTarget: item.sshTarget,
       sshPort: item.sshPort,
       localPort: item.localPort,
@@ -176,8 +194,12 @@ function normalizePersistedHost(value: unknown): FleetHostConfig | null {
 }
 
 export function publicHostConfig(host: FleetHostConfig): FleetHostPublicConfig {
-  const { token: _token, ...safe } = host
-  return { ...safe, hasToken: Boolean(host.token) }
+  const { token: _token, controlToken: _controlToken, ...safe } = host
+  return {
+    ...safe,
+    hasToken: Boolean(host.token),
+    hasControlToken: Boolean(host.controlToken),
+  }
 }
 
 function sortedHosts(hosts: Map<string, FleetHostConfig>): FleetHostConfig[] {

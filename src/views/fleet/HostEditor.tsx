@@ -31,6 +31,8 @@ export function HostEditor({
   const [remotePort, setRemotePort] = useState(String(host?.config.remotePort || 4311))
   const [enabled, setEnabled] = useState(host?.config.enabled !== false)
   const [token, setToken] = useState('')
+  const [controlEnabled, setControlEnabled] = useState(host?.config.controlEnabled === true)
+  const [controlToken, setControlToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [confirmRemove, setConfirmRemove] = useState(false)
@@ -75,6 +77,7 @@ export function HostEditor({
     setBaseUrl('')
     setSshTarget('')
     setToken('')
+    setControlToken('')
   }, [host, privacy.enabled])
 
   const submit = async (event: FormEvent) => {
@@ -96,6 +99,8 @@ export function HostEditor({
       input.baseUrl = baseUrl.trim()
     }
     if (token) input.token = token
+    input.controlEnabled = controlEnabled
+    if (controlToken) input.controlToken = controlToken
     try {
       const result = host
         ? await updateFleetHost(host.id, input)
@@ -132,8 +137,8 @@ export function HostEditor({
           <button type="button" onClick={onClose} aria-label="Close host registry editor"><X size={18} /></button>
         </header>
         <p>
-          Connection settings stay on this central machine. The host agent exposes negotiated,
-          read-only telemetry only.
+          Connection settings stay on this central machine. Monitoring remains read-only;
+          secure remote sessions require a separate host-issued control token.
         </p>
         {privacy.enabled && host && (
           <div className="fleet-editor-privacy"><ShieldCheck size={14} /> Sensitive values are hidden. Leave a field blank to keep its current value.</div>
@@ -218,9 +223,36 @@ export function HostEditor({
               onChange={(event) => setToken(event.target.value)}
             />
           </label>
+          <label>
+            <span>Control token {host ? '(optional replacement)' : ''}</span>
+            <input
+              name="controlToken"
+              type="password"
+              autoComplete="new-password"
+              spellCheck={false}
+              value={controlToken}
+              required={controlEnabled && !host?.config.hasControlToken}
+              placeholder={host
+                ? 'Leave blank to keep current control token'
+                : 'Paste the separate remote-control token…'}
+              onChange={(event) => setControlToken(event.target.value)}
+            />
+          </label>
           <label className="fleet-enabled-toggle">
             <input name="enabled" type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
             <span><strong>Monitor enabled</strong><small>Poll this host on the registry schedule.</small></span>
+          </label>
+          <label className="fleet-enabled-toggle">
+            <input
+              name="controlEnabled"
+              type="checkbox"
+              checked={controlEnabled}
+              onChange={(event) => setControlEnabled(event.target.checked)}
+            />
+            <span>
+              <strong>Secure remote sessions</strong>
+              <small>Allow chat, exact permission decisions, and turn interruption.</small>
+            </span>
           </label>
         </div>
         {error && (

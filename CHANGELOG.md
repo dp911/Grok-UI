@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — v0.11 secure remote sessions
+
+- Added an explicitly enabled Remote Session Console that lets a user start a
+  managed Grok session on a trusted host, receive live structured updates, send
+  natural-language follow-ups, resolve Grok-advertised permissions, and
+  interrupt an active turn.
+- Kept the v0.10 monitoring plane read-only and added a separate per-host
+  control credential, exact control-route allowlist, negotiated capabilities,
+  and healthy/fresh host gate.
+- Added durable idempotent command delivery with payload fingerprints,
+  bounded expiry, concurrent retry coalescing, unknown-after-restart
+  reconciliation, non-evicting active replay protection, sanitized failures,
+  bounded audit evidence, atomic persistence, and user-only file permissions.
+- Restricted remote Start to workspaces already observed by the host and kept
+  existing CLI-observed sessions read-only. Credentials, prompts, raw provider
+  errors, arbitrary shell execution, arbitrary fetches, and raw file mutation
+  stay outside the control protocol and audit record.
+- Added server, connector, registry, monitor, protocol, browser-parser, and
+  production end-to-end coverage for authentication, capability, freshness,
+  duplicate delivery, live chat, permissions, and interruption.
+
 ## 0.10.0 — 2026-07-28
 
 - Added a lightweight, bearer-authenticated host agent that reuses the existing

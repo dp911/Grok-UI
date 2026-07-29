@@ -1,9 +1,19 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import {
   FLEET_PROTOCOL_VERSION,
   MAX_AGENT_BODY_BYTES,
 } from './fleet-protocol.js'
-import { startHostAgent, type HostAgentProvider } from './host-agent.js'
+import { LocalHostAgentProvider, startHostAgent, type HostAgentProvider } from './host-agent.js'
+
+const cleanup: string[] = []
+
+afterEach(async () => {
+  await Promise.all(cleanup.splice(0).map((directory) =>
+    fs.rm(directory, { recursive: true, force: true })))
+})
 
 function usage() {
   return {
@@ -189,5 +199,124 @@ describe('read-only host agent protocol', () => {
     } finally {
       await agent.close()
     }
+  })
+})
+
+describe('secure remote session protocol', () => {
+  it('uses a separate control credential and executes a retried follow-up only once', async () => {
+    const base = provider()
+    let promptCalls = 0
+    const controlled: HostAgentProvider = {
+      ...base,
+      async remoteSession(id) {
+        const detail = await base.session(id)
+        if (!detail) return null
+        return {
+          ...detail,
+          revision: 'revision-1',
+          permissions: [{
+            id: 'permission-1',
+            sessionId: 'session-1',
+            title: 'Allow the exact tool?',
+            toolKind: 'execute',
+            toolCallId: 'tool-1',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            options: [{ id: 'allow-once', name: 'Allow once', kind: 'allow_once' }],
+          }],
+        }
+      },
+      async promptRemoteSession() {
+        promptCalls += 1
+      },
+      async interruptRemoteSession() {},
+      async resolveRemotePermission() {},
+      async createRemoteSession() {
+        return 'session-created'
+      },
+    }
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'grok-ui-agent-control-'))
+    cleanup.push(directory)
+    const agent = await startHostAgent({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'observe-secret',
+      controlToken: 'control-secret',
+      stateDirectory: directory,
+      provider: controlled,
+    })
+    const controlHeaders = {
+      Authorization: 'Bearer control-secret',
+      'Content-Type': 'application/json',
+    }
+    try {
+      expect((await fetch(`${agent.url}/agent/control/v1/sessions/session-1`, {
+        headers: { Authorization: 'Bearer observe-secret' },
+      })).status).toBe(401)
+      const snapshot = await fetch(`${agent.url}/agent/control/v1/sessions/session-1`, {
+        headers: { Authorization: 'Bearer control-secret' },
+      })
+      expect(snapshot.status).toBe(200)
+      expect(await snapshot.json()).toMatchObject({
+        revision: 'revision-1',
+        permissions: [{ id: 'permission-1', options: [{ id: 'allow-once' }] }],
+      })
+
+      const body = JSON.stringify({
+        commandId: 'follow-up-1',
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        prompt: 'Continue safely',
+      })
+      const first = await fetch(`${agent.url}/agent/control/v1/sessions/session-1/prompt`, {
+        method: 'POST',
+        headers: controlHeaders,
+        body,
+      })
+      const retry = await fetch(`${agent.url}/agent/control/v1/sessions/session-1/prompt`, {
+        method: 'POST',
+        headers: controlHeaders,
+        body,
+      })
+      expect(first.status).toBe(202)
+      expect(retry.status).toBe(202)
+      expect(await first.json()).toMatchObject({
+        commandId: 'follow-up-1',
+        status: 'completed',
+        sessionId: 'session-1',
+      })
+      expect(await retry.json()).toMatchObject({ commandId: 'follow-up-1', status: 'completed' })
+      expect(promptCalls).toBe(1)
+
+      expect((await fetch(`${agent.url}/agent/control/v1/arbitrary`, {
+        method: 'POST',
+        headers: controlHeaders,
+        body: JSON.stringify({ commandId: 'bad-route' }),
+      })).status).toBe(404)
+      expect((await fetch(`${agent.url}/agent/v1/snapshot`, {
+        headers: { Authorization: 'Bearer control-secret' },
+      })).status).toBe(401)
+    } finally {
+      await agent.close()
+    }
+  })
+
+  it('refuses to turn an observation credential into a control credential', async () => {
+    await expect(startHostAgent({
+      host: '127.0.0.1',
+      port: 0,
+      token: 'same-secret',
+      controlToken: 'same-secret',
+      provider: provider(),
+    })).rejects.toThrow(/separate/i)
+  })
+
+  it('does not attach an observed CLI session to remote control', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'grok-ui-managed-boundary-'))
+    cleanup.push(directory)
+    const local = new LocalHostAgentProvider(directory, path.join(directory, 'grok'), true)
+    await expect(local.remoteSession('observed-cli-session')).rejects.toThrow(/host-managed/i)
+    await expect(local.promptRemoteSession(
+      'observed-cli-session',
+      'do not attach this session',
+    )).rejects.toThrow(/host-managed/i)
   })
 })
