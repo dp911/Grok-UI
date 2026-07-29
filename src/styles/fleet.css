@@ -638,7 +638,7 @@
 .fleet-session-state.state-live { color: var(--lime); }
 .fleet-session-state.state-attention { color: var(--coral); }
 .fleet-session-actions { display: inline-flex; align-items: center; gap: 5px; }
-.fleet-session-cards { display: none; }
+.fleet-session-cards { display: grid; }
 .fleet-session-card {
   min-width: 0;
   border-bottom: 1px solid var(--line-strong);
@@ -1132,8 +1132,7 @@
   .fleet-runtime-grid > section { border-right: 0; }
   .fleet-usage-summary { grid-template-columns: 1fr; }
   .fleet-usage-summary > div { min-height: 73px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .fleet-session-table { display: none; }
-  .fleet-session-cards { display: grid; }
+  .fleet-table:not(.fleet-session-table) { min-width: 720px; }
   .fleet-remote-start { grid-template-columns: 1fr; align-items: stretch; }
   .fleet-remote-start > div { grid-column: auto; }
   .fleet-remote-start select,

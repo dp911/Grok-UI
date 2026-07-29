@@ -607,14 +607,30 @@ test.describe.serial('public launch path', () => {
       expect(await page.evaluate(() =>
         document.documentElement.scrollWidth - document.documentElement.clientWidth,
       )).toBe(0)
+
+      await page.getByRole('tab', { name: 'Usage' }).click()
+      const usageTable = page.locator('.fleet-usage-table')
+      await expect(usageTable).toBeVisible()
+      expect(await usageTable.evaluate((element) => element.scrollWidth)).toBeGreaterThanOrEqual(720)
     }
 
+    await page.getByRole('tab', { name: 'Sessions' }).click()
+    await page.setViewportSize({ width: 700, height: 900 })
+    await expect(page.locator('.fleet-session-table')).toBeVisible()
+    await expect(page.locator('.fleet-session-cards')).toHaveCount(0)
+    await page.setViewportSize({ width: 680, height: 900 })
+    await expect(page.locator('.fleet-session-cards')).toBeVisible()
+    await expect(page.locator('.fleet-session-table')).toHaveCount(0)
+
     const mobileNav = page.getByRole('navigation', { name: 'Mobile navigation' })
-    await mobileNav.getByRole('button', { name: 'More' }).click()
+    const moreButton = mobileNav.getByRole('button', { name: 'More' })
+    await moreButton.click()
     await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
-    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Close navigation' }).first().click()
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeHidden()
+    await expect(page.locator('.sidebar-close')).toBeFocused()
+    await page.locator('.sidebar-close').click()
     await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
+    await expect(moreButton).toBeFocused()
   })
 
   test('keeps remote chat above mobile navigation and sends a follow-up', async ({ page }) => {
@@ -642,9 +658,11 @@ test.describe.serial('public launch path', () => {
 
     await prompt.fill('Confirm the mobile follow-up path')
     await page.getByRole('button', { name: 'Send remote follow-up' }).click()
-    await expect(page.getByText('Remote host accepted: Confirm the mobile follow-up path')).toBeVisible()
+    await expect(page.getByText('Remote host accepted: Confirm the mobile follow-up path')).toBeVisible({
+      timeout: 10_000,
+    })
 
-    await page.getByRole('button', { name: 'Close remote session' }).last().click()
+    await page.getByRole('button', { name: 'Close remote session panel' }).click()
     await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
   })
 

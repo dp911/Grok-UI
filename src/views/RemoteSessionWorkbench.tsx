@@ -234,7 +234,7 @@ export function RemoteSessionWorkbench({
       aria-modal="true"
       aria-label={`Remote session: ${privacy.sessionTitle(session?.title || sessionId, sessionId)}`}
     >
-      <button className="workbench-scrim" onClick={onClose} aria-label="Close remote session" />
+      <button className="workbench-scrim" onClick={onClose} aria-label="Dismiss remote session" />
       <section className="session-workbench remote-session-workbench">
         <header className="workbench-head">
           <div className="workbench-identity">
@@ -270,7 +270,7 @@ export function RemoteSessionWorkbench({
                 <span>Interrupt</span>
               </button>
             )}
-            <button className="icon-button" onClick={onClose} aria-label="Close remote session"><X size={19} /></button>
+            <button className="icon-button" onClick={onClose} aria-label="Close remote session panel"><X size={19} /></button>
           </div>
         </header>
 

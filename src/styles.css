@@ -4816,15 +4816,21 @@ kbd {
     z-index: 30;
     left: 8px;
     right: 8px;
-    bottom: max(8px, env(safe-area-inset-bottom));
-    min-height: var(--mobile-nav-height);
-    padding: 6px;
+    bottom: 0;
+    min-height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     border: 1px solid var(--line-strong);
     background: rgba(10,11,9,.94);
     backdrop-filter: blur(18px);
     box-shadow: 0 12px 35px rgba(0,0,0,.45);
+  }
+
+  .mobile-bottom-nav.is-suspended {
+    visibility: hidden;
+    pointer-events: none;
+    opacity: 0;
   }
 
   .mobile-bottom-nav button {

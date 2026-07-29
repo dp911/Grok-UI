@@ -192,12 +192,12 @@ export function FleetSessions({
               </tbody>
             </table>
           </div>}
-          {phoneLayout && <div className="fleet-session-cards" aria-label="Sessions observed on this host">
+          {phoneLayout && <div className="fleet-session-cards" role="list" aria-label="Sessions observed on this host">
             {observed.map((session) => {
               const title = privacy.sessionTitle(session.title, `${host.id}:${session.id}`)
               const managed = canControl && managedSessionIds.has(session.id)
               return (
-                <article className="fleet-session-card" key={`mobile:${host.id}:${session.id}`}>
+                <article className="fleet-session-card" role="listitem" key={`mobile:${host.id}:${session.id}`}>
                   <header>
                     <span className={`fleet-session-state state-${session.status}`}><i /> {session.status}</span>
                     <time title={exactTime(session.updatedAt)}>{elapsedLabel(session.updatedAt)}</time>

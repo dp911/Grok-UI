@@ -209,6 +209,7 @@ function App() {
   const [theme, setTheme] = useState<ThemeId>(storedTheme)
   const [privacyMode, setPrivacyMode] = useState(storedPrivacy)
   const lastAttentionRef = useRef(0)
+  const mobileNavTriggerRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -337,6 +338,29 @@ function App() {
     lastAttentionRef.current = attention
   }, [control?.permissions, live?.attentionCount, privacyMode])
 
+  const openMobileNav = useCallback(() => {
+    mobileNavTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    setMobileNavOpen(true)
+  }, [])
+
+  const closeMobileNav = useCallback(() => {
+    setMobileNavOpen(false)
+    requestAnimationFrame(() => {
+      const trigger = mobileNavTriggerRef.current
+      if (trigger?.isConnected) trigger.focus()
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const frame = requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>('.sidebar-close')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [mobileNavOpen])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
@@ -350,7 +374,7 @@ function App() {
         setPaletteOpen(false)
         setSelectedSession(null)
         setRemoteSession(null)
-        setMobileNavOpen(false)
+        closeMobileNav()
       }
       if (!typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const navItem = NAV_ITEMS.find((item) => item.shortcut === event.key)
@@ -363,7 +387,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [closeMobileNav])
 
   const setActiveView = (next: ViewId) => {
     setView(next)
@@ -404,7 +428,7 @@ function App() {
           version={data?.version || '—'}
           open={mobileNavOpen}
           onNavigate={setActiveView}
-          onClose={() => setMobileNavOpen(false)}
+          onClose={closeMobileNav}
         />
 
         <main className="main-stage">
@@ -414,7 +438,7 @@ function App() {
             generatedAt={live?.generatedAt || data?.generatedAt}
             refreshing={refreshing}
             privacyMode={privacyMode}
-            onMenu={() => setMobileNavOpen(true)}
+            onMenu={openMobileNav}
             onPalette={() => setPaletteOpen(true)}
             onRefresh={() => void load(true)}
             onTogglePrivacy={() => setPrivacyMode((enabled) => !enabled)}
@@ -499,11 +523,12 @@ function App() {
         )}
         </main>
 
-        {!selectedSession && !remoteSession && !paletteOpen && !mobileNavOpen && (
+        {!selectedSession && !remoteSession && !paletteOpen && (
           <MobileNav
             active={view}
             onNavigate={setActiveView}
-            onMore={() => setMobileNavOpen(true)}
+            onMore={openMobileNav}
+            suspended={mobileNavOpen}
           />
         )}
         {selectedSession && (
@@ -657,7 +682,7 @@ function Sidebar({
         </div>
 
         <div className="rail-label">Navigation / 01</div>
-        <nav className="primary-nav" aria-label="Primary navigation">
+        <nav className="primary-nav" id="primary-navigation" aria-label="Primary navigation">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon
             return (
@@ -1802,20 +1827,32 @@ function MobileNav({
   active,
   onNavigate,
   onMore,
+  suspended,
 }: {
   active: ViewId
   onNavigate: (view: ViewId) => void
   onMore: () => void
+  suspended: boolean
 }) {
   const primaryItems = NAV_ITEMS.filter((item) => MOBILE_NAV_IDS.includes(item.id))
   const moreActive = !MOBILE_NAV_IDS.includes(active)
   return (
-    <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+    <nav
+      className={`mobile-bottom-nav ${suspended ? 'is-suspended' : ''}`}
+      aria-label="Mobile navigation"
+      aria-hidden={suspended}
+      inert={suspended}
+    >
       {primaryItems.map((item) => {
         const Icon = item.icon
         return <button key={item.id} className={active === item.id ? 'is-active' : ''} onClick={() => onNavigate(item.id)}><Icon size={18} /><span>{item.label}</span></button>
       })}
-      <button className={moreActive ? 'is-active' : ''} onClick={onMore}>
+      <button
+        className={moreActive ? 'is-active' : ''}
+        onClick={onMore}
+        aria-controls="primary-navigation"
+        aria-expanded={suspended}
+      >
         <Menu size={18} />
         <span>More</span>
       </button>
