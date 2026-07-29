@@ -339,6 +339,11 @@ export function RemoteSessionWorkbench({
           />
           <button
             disabled={sending || !controlAvailable || !prompt.trim() || data?.control?.state === 'stopping'}
+            aria-label={sending
+              ? 'Sending remote follow-up'
+              : pendingPrompt
+                ? 'Retry remote follow-up'
+                : 'Send remote follow-up'}
           >
             {sending
               ? <LoaderCircle className="is-spinning" size={17} />

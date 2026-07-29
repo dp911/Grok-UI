@@ -98,6 +98,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'themes', index: '12', label: 'Themes', eyebrow: 'Appearance', icon: Palette, shortcut: '0' },
 ]
 
+const MOBILE_NAV_IDS: ViewId[] = ['live', 'control', 'runs', 'fleet']
+
 type ThemeId = 'operator' | 'event-horizon' | 'minimal-calm'
 
 const DEFAULT_THEME: ThemeId = 'event-horizon'
@@ -497,7 +499,13 @@ function App() {
         )}
         </main>
 
-        <MobileNav active={view} onNavigate={setActiveView} />
+        {!selectedSession && !remoteSession && !paletteOpen && !mobileNavOpen && (
+          <MobileNav
+            active={view}
+            onNavigate={setActiveView}
+            onMore={() => setMobileNavOpen(true)}
+          />
+        )}
         {selectedSession && (
           <SessionWorkbench
             sessionId={selectedSession.id}
@@ -1790,13 +1798,27 @@ function CommandPalette({
   )
 }
 
-function MobileNav({ active, onNavigate }: { active: ViewId; onNavigate: (view: ViewId) => void }) {
+function MobileNav({
+  active,
+  onNavigate,
+  onMore,
+}: {
+  active: ViewId
+  onNavigate: (view: ViewId) => void
+  onMore: () => void
+}) {
+  const primaryItems = NAV_ITEMS.filter((item) => MOBILE_NAV_IDS.includes(item.id))
+  const moreActive = !MOBILE_NAV_IDS.includes(active)
   return (
     <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-      {NAV_ITEMS.filter((item) => item.id !== 'themes').map((item) => {
+      {primaryItems.map((item) => {
         const Icon = item.icon
         return <button key={item.id} className={active === item.id ? 'is-active' : ''} onClick={() => onNavigate(item.id)}><Icon size={18} /><span>{item.label}</span></button>
       })}
+      <button className={moreActive ? 'is-active' : ''} onClick={onMore}>
+        <Menu size={18} />
+        <span>More</span>
+      </button>
     </nav>
   )
 }

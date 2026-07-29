@@ -7,6 +7,7 @@ const fixtureRoot = path.join(os.tmpdir(), 'grok-ui-e2e')
 const grokHome = path.join(fixtureRoot, 'grok-home')
 const workspace = path.join(fixtureRoot, 'secret-client')
 const sessionId = 'live-e2e-session'
+const fleetFixtureFile = path.join(fixtureRoot, 'fixture.json')
 
 async function unreadableVisibleText(page: Page, minimumPx = 8) {
   return page.locator('body *').evaluateAll((elements, minimum) => elements
@@ -111,6 +112,38 @@ async function registerLiveSession() {
     cwd: workspace,
     opened_at: timestamp,
   }]))
+}
+
+async function registerControlledFleetHost(page: Page) {
+  const current = await (await page.request.get('/api/fleet')).json()
+  const existing = current.hosts.find((host: { label: string }) => host.label === 'Mobile Build Mac')
+  if (existing) return existing.id as string
+
+  const fixture = JSON.parse(await fs.readFile(fleetFixtureFile, 'utf8')) as {
+    fleetHosts: {
+      healthy: { url: string; token: string; controlToken: string }
+    }
+  }
+  const created = await page.request.post('/api/fleet/hosts', {
+    data: {
+      label: 'Mobile Build Mac',
+      transport: 'direct',
+      baseUrl: fixture.fleetHosts.healthy.url,
+      token: fixture.fleetHosts.healthy.token,
+      controlEnabled: true,
+      controlToken: fixture.fleetHosts.healthy.controlToken,
+    },
+  })
+  expect(created.ok()).toBe(true)
+  const hostId = (await created.json()).host.id as string
+
+  await expect.poll(async () => {
+    await page.request.post(`/api/fleet/hosts/${hostId}/refresh`)
+    const fleet = await (await page.request.get('/api/fleet')).json()
+    return fleet.hosts.find((host: { id: string }) => host.id === hostId)?.status
+  }, { timeout: 10_000 }).toBe('healthy')
+
+  return hostId
 }
 
 test.describe.serial('public launch path', () => {
@@ -533,6 +566,86 @@ test.describe.serial('public launch path', () => {
     }))
     expect(consoleOverflow.scrollWidth).toBeLessThanOrEqual(consoleOverflow.clientWidth)
     expect(await unreadableVisibleText(page)).toEqual([])
+  })
+
+  test('keeps Fleet navigation and session actions usable across phone widths', async ({ page }) => {
+    await page.goto('/')
+    await registerControlledFleetHost(page)
+
+    for (const viewport of [
+      { width: 360, height: 800 },
+      { width: 390, height: 844 },
+      { width: 430, height: 932 },
+    ]) {
+      await page.setViewportSize(viewport)
+      await page.reload()
+
+      const mobileNav = page.getByRole('navigation', { name: 'Mobile navigation' })
+      await expect(mobileNav).toBeVisible()
+      await expect(mobileNav.getByRole('button')).toHaveCount(5)
+      await mobileNav.getByRole('button', { name: 'Fleet' }).click()
+      await expect(page.getByRole('heading', { name: /Every host/ })).toBeVisible()
+
+      const fleetFilter = page.locator('.fleet-filter')
+      expect(await fleetFilter.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0)
+      expect((await fleetFilter.getByRole('button').first().boundingBox())?.height).toBeGreaterThanOrEqual(44)
+
+      await page.locator('.fleet-host-row').filter({ hasText: 'Mobile Build Mac' }).click()
+      await page.getByRole('tab', { name: 'Sessions' }).click()
+      expect(await page.locator('.fleet-tabs').evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      )).toBe(0)
+      await expect(page.locator('.fleet-session-cards')).toBeVisible()
+      await expect(page.locator('.fleet-session-table')).toBeHidden()
+
+      const continueButton = page.getByRole('button', { name: /Continue remote session/ })
+      const inspectButton = page.getByRole('button', { name: /Inspect read-only session/ })
+      await expect(continueButton).toBeVisible()
+      await expect(inspectButton).toBeVisible()
+      expect((await continueButton.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+      expect((await inspectButton.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+      expect(await page.evaluate(() =>
+        document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )).toBe(0)
+    }
+
+    const mobileNav = page.getByRole('navigation', { name: 'Mobile navigation' })
+    await mobileNav.getByRole('button', { name: 'More' }).click()
+    await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Close navigation' }).first().click()
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
+  })
+
+  test('keeps remote chat above mobile navigation and sends a follow-up', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/')
+    await registerControlledFleetHost(page)
+    await page.reload()
+
+    const mobileNav = page.getByRole('navigation', { name: 'Mobile navigation' })
+    await mobileNav.getByRole('button', { name: 'Fleet' }).click()
+    await page.locator('.fleet-host-row').filter({ hasText: 'Mobile Build Mac' }).click()
+    await page.getByRole('tab', { name: 'Sessions' }).click()
+    await page.getByRole('button', { name: /Continue remote session/ }).click()
+
+    await expect(page.getByRole('dialog', { name: /Remote session:/ })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toHaveCount(0)
+
+    const composer = page.locator('.workbench-composer')
+    const prompt = page.getByPlaceholder('Continue this Grok Build session…')
+    await expect(composer).toBeVisible()
+    await expect(prompt).toBeVisible()
+    const composerBox = await composer.boundingBox()
+    expect(composerBox).not.toBeNull()
+    expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(844)
+
+    await prompt.fill('Confirm the mobile follow-up path')
+    await page.getByRole('button', { name: 'Send remote follow-up' }).click()
+    await expect(page.getByText('Remote host accepted: Confirm the mobile follow-up path')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Close remote session' }).last().click()
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
   })
 
   test('keeps supporting text readable across every dashboard section', async ({ page }) => {

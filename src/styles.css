@@ -25,6 +25,7 @@
   --type-control: 12px;
   --sidebar: 236px;
   --topbar: 64px;
+  --mobile-nav-height: 68px;
 }
 
 * {
@@ -69,6 +70,7 @@ button {
 button,
 a {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button:focus-visible,
@@ -2733,6 +2735,7 @@ kbd {
   position: fixed;
   z-index: 80;
   inset: 0;
+  overscroll-behavior: contain;
 }
 
 .drawer-scrim,
@@ -4509,7 +4512,7 @@ kbd {
   }
 
   .view-wrap {
-    padding: 32px 14px 90px;
+    padding: 32px 14px calc(96px + env(safe-area-inset-bottom));
   }
 
   .page-intro {
@@ -4568,8 +4571,17 @@ kbd {
     padding: 14px;
   }
 
+  .runtime-identity {
+    width: 100%;
+  }
+
   .runtime-identity h2 {
+    display: -webkit-box;
     font-size: 14px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .runtime-instruments {
@@ -4772,7 +4784,7 @@ kbd {
   }
 
   .drawer-content {
-    padding: 28px 20px 40px;
+    padding: 28px 20px calc(40px + env(safe-area-inset-bottom));
   }
 
   .drawer-stat-grid {
@@ -4804,11 +4816,11 @@ kbd {
     z-index: 30;
     left: 8px;
     right: 8px;
-    bottom: 8px;
-    min-height: 60px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    min-height: var(--mobile-nav-height);
     padding: 6px;
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     border: 1px solid var(--line-strong);
     background: rgba(10,11,9,.94);
     backdrop-filter: blur(18px);
@@ -4817,6 +4829,7 @@ kbd {
 
   .mobile-bottom-nav button {
     min-width: 0;
+    min-height: 48px;
     display: grid;
     place-items: center;
     gap: 3px;
@@ -5028,6 +5041,7 @@ kbd {
   display: grid;
   place-items: center;
   padding: 18px;
+  overscroll-behavior: contain;
 }
 
 .workbench-scrim {
@@ -5086,6 +5100,11 @@ kbd {
 @keyframes workbench-enter {
   from { opacity: 0; transform: translateY(12px) scale(.992); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes workbench-mobile-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .workbench-head {
@@ -6326,6 +6345,7 @@ kbd {
     height: 100dvh;
     min-height: 0;
     border: 0;
+    animation: workbench-mobile-enter .18s ease-out both;
   }
 
   .workbench-head {
@@ -6403,6 +6423,11 @@ kbd {
 }
 
 @media (max-width: 600px) {
+  .topbar .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
   .workbench-head {
     min-height: 83px;
   }
@@ -6431,8 +6456,8 @@ kbd {
 
   .workbench-head-actions .icon-button,
   .workbench-head-actions > button:not(.icon-button) {
-    width: 34px;
-    min-height: 34px;
+    width: 44px;
+    min-height: 44px;
   }
 
   .workbench-tabs {
@@ -6544,9 +6569,14 @@ kbd {
     justify-content: flex-start;
   }
 
+  .workbench-permission button {
+    min-height: 44px;
+    padding: 0 12px;
+  }
+
   .workbench-composer {
-    min-height: 100px;
-    padding: 10px;
+    min-height: calc(100px + env(safe-area-inset-bottom));
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
     grid-template-columns: minmax(0, 1fr) 74px;
   }
 
@@ -7856,7 +7886,7 @@ kbd {
   .workflow-empty { grid-template-columns: 130px minmax(0, 1fr); }
   .workflow-empty > button { grid-column: 2; width: max-content; }
   .workflow-radar { width: 120px; }
-  .mobile-bottom-nav { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+  .mobile-bottom-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
 
 @media (max-width: 680px) {
@@ -7898,21 +7928,16 @@ kbd {
   .workflow-empty > button { grid-column: 1; }
   .workflow-radar { width: 100px; }
   .mobile-bottom-nav {
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    grid-auto-columns: 64px;
-    overflow-x: auto;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    overflow-x: hidden;
     overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-    scrollbar-width: none;
   }
-  .mobile-bottom-nav::-webkit-scrollbar { display: none; }
   .mobile-bottom-nav button {
-    min-width: 64px;
+    min-width: 0;
     padding-left: 4px;
     padding-right: 4px;
-    scroll-snap-align: start;
   }
   .mobile-bottom-nav button svg { width: 15px; }
   .mobile-bottom-nav button span {
