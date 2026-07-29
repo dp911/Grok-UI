@@ -7,7 +7,7 @@ const fixtureRoot = path.join(os.tmpdir(), 'grok-ui-e2e')
 
 interface FleetFixture {
   fleetControlFile: string
-  fleetHosts: Record<string, { url: string; token: string }>
+  fleetHosts: Record<string, { url: string; token: string; controlToken?: string }>
 }
 
 async function fixture(): Promise<FleetFixture> {
@@ -17,8 +17,8 @@ async function fixture(): Promise<FleetFixture> {
 async function registerHost(
   request: APIRequestContext,
   label: string,
-  target: { url: string; token: string },
-  options: { transport?: 'direct' | 'tailscale'; enabled?: boolean } = {},
+  target: { url: string; token: string; controlToken?: string },
+  options: { transport?: 'direct' | 'tailscale'; enabled?: boolean; control?: boolean } = {},
 ) {
   const response = await request.post('/api/fleet/hosts', {
     data: {
@@ -26,6 +26,8 @@ async function registerHost(
       transport: options.transport || 'direct',
       baseUrl: target.url,
       token: target.token,
+      controlToken: options.control ? target.controlToken : undefined,
+      controlEnabled: options.control === true,
       enabled: options.enabled !== false,
     },
   })
@@ -201,6 +203,43 @@ test.describe.serial('read-only fleet monitoring', () => {
     await page.getByRole('button', { name: /Fleet/ }).click()
     await expect(page.getByRole('button', { name: 'Privacy on' })).toHaveAttribute('aria-pressed', 'true')
     expect(await page.locator('body').innerText()).not.toContain('Healthy Workstation')
+  })
+
+  test('continues one remote Grok session with live chat, permission, and interruption', async ({ page }) => {
+    const setup = await fixture()
+    await page.goto('/')
+    await page.getByRole('button', { name: /Fleet/ }).click()
+    await registerHost(
+      page.request,
+      'Remote Session Workstation',
+      setup.fleetHosts.healthy,
+      { control: true },
+    )
+    await expect.poll(() => fleetStatus(page.request, 'Remote Session Workstation'), {
+      timeout: 15_000,
+    }).toBe('healthy')
+
+    const hostRow = page.locator('.fleet-host-row').filter({ hasText: 'Remote Session Workstation' })
+    await expect(hostRow).toBeVisible()
+    await hostRow.click()
+    await page.getByRole('tab', { name: 'Sessions' }).click()
+    await page.getByRole('button', { name: /Continue remote session Remote Confidential Phoenix/ }).click()
+
+    const remote = page.getByRole('dialog', { name: /Remote session:/ })
+    await expect(remote).toBeVisible()
+    await expect(remote.getByText('Remote transcript for Example Operator')).toBeVisible()
+    await expect(remote.getByText('Allow the remote verification tool?')).toBeVisible()
+    await remote.getByRole('button', { name: 'Allow once' }).click()
+    await expect(remote.getByText('Permission decision accepted by the remote host.')).toBeVisible()
+    await expect(remote.getByText('Allow the remote verification tool?')).toHaveCount(0)
+
+    await remote.getByPlaceholder('Continue this Grok Build session…').fill('Continue from my phone')
+    await remote.getByRole('button', { name: 'SEND' }).click()
+    await expect(remote.getByText('Remote host accepted: Continue from my phone')).toBeVisible({
+      timeout: 10_000,
+    })
+    await remote.getByRole('button', { name: 'Interrupt remote turn' }).click()
+    await expect(remote.getByText('INTERRUPTED').first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('transitions a disconnected host through stale and offline before reconnecting', async ({ page }) => {

@@ -101,6 +101,8 @@ class MockConnector implements FleetConnector {
   snapshotRevision = 0
   rejectedToken = ''
   requests: Array<{ token: string; path: string }> = []
+  controlEnabled = false
+  controlRequests: Array<{ token: string; path: string; body?: unknown }> = []
 
   constructor(private readonly advance?: (milliseconds: number) => void) {}
 
@@ -119,14 +121,65 @@ class MockConnector implements FleetConnector {
       if (mode === 'unauthorized') throw new FleetConnectionError('unauthorized', 'Token rejected.', 401)
       if (mode === 'malformed') throw new Error('malformed')
       if (mode === 'slow') this.advance?.(1_000)
-      if (fixedPath.endsWith('/hello')) return mode === 'incompatible' ? hello(2, 3) : hello()
+      if (fixedPath.endsWith('/hello')) {
+        const value = mode === 'incompatible' ? hello(2, 3) : hello()
+        return this.controlEnabled ? {
+          ...value,
+          capabilities: [
+            ...value.capabilities,
+            'remote.sessions',
+            'remote.sessions.create',
+            'remote.sessions.prompt',
+            'remote.sessions.interrupt',
+            'remote.permissions.resolve',
+          ],
+        } : value
+      }
       if (fixedPath.endsWith('/snapshot')) {
-        return snapshot(mode === 'degraded', mode === 'large', this.snapshotRevision)
+        const value = snapshot(mode === 'degraded', mode === 'large', this.snapshotRevision)
+        return this.controlEnabled ? {
+          ...value,
+          capabilities: [...value.capabilities, 'remote.sessions'],
+        } : value
       }
       if (fixedPath.startsWith('/agent/v1/usage')) return usage()
       throw new Error(`Unexpected path ${fixedPath}`)
     } finally {
       this.active -= 1
+    }
+  }
+
+  async getControlJson(host: FleetHostConfig, fixedPath: string): Promise<unknown> {
+    this.controlRequests.push({ token: host.controlToken, path: fixedPath })
+    return {
+      protocolVersion: 1,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      revision: 'remote-revision-1',
+      hostId: 'agent-host',
+      session: snapshot().sessions[0],
+      transcript: [{ id: 'event-1', type: 'assistant', text: 'Remote reply' }],
+      live: null,
+      control: null,
+      workflows: [],
+      permissions: [],
+      managed: true,
+    }
+  }
+
+  async postControlJson(
+    host: FleetHostConfig,
+    fixedPath: string,
+    body: unknown,
+  ): Promise<unknown> {
+    this.controlRequests.push({ token: host.controlToken, path: fixedPath, body })
+    return {
+      commandId: (body as { commandId: string }).commandId,
+      kind: 'session.prompt',
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      sessionId: 'session-1',
+      error: '',
     }
   }
 }
@@ -375,6 +428,51 @@ describe('FleetMonitor', () => {
       )
       expect(fleet.hosts.some((host) => host.status === 'degraded')).toBe(true)
       expect(fleet.hosts.some((host) => host.snapshot?.sections.sessions === 'partial')).toBe(true)
+    } finally {
+      await monitor.stop()
+    }
+  })
+
+  it('allows only fresh, healthy, explicitly authorized remote session commands', async () => {
+    let time = 1_000
+    const { registry, hosts } = await setup()
+    await registry.update(hosts[0].id, {
+      controlToken: 'control-token',
+      controlEnabled: true,
+    })
+    const connector = new MockConnector()
+    connector.controlEnabled = true
+    const monitor = new FleetMonitor(registry, connector, () => time)
+    await monitor.start()
+    try {
+      const session = await monitor.remoteSession(hosts[0].id, `${hosts[0].id}:session-1`)
+      expect(session).toMatchObject({
+        hostId: hosts[0].id,
+        session: { id: `${hosts[0].id}:session-1` },
+        transcript: [{ id: 'event-1', text: 'Remote reply' }],
+      })
+      const receipt = await monitor.promptRemoteSession(
+        hosts[0].id,
+        `${hosts[0].id}:session-1`,
+        { commandId: 'prompt-1', expiresAt: '2026-01-01T00:10:00.000Z', prompt: 'Continue' },
+      )
+      expect(receipt).toMatchObject({
+        commandId: 'prompt-1',
+        sessionId: `${hosts[0].id}:session-1`,
+        status: 'completed',
+      })
+      expect(connector.controlRequests).toContainEqual({
+        token: 'control-token',
+        path: `/agent/control/v1/sessions/session-1/prompt`,
+        body: { commandId: 'prompt-1', expiresAt: '2026-01-01T00:10:00.000Z', prompt: 'Continue' },
+      })
+
+      time += 16_000
+      await expect(monitor.promptRemoteSession(
+        hosts[0].id,
+        `${hosts[0].id}:session-1`,
+        { commandId: 'stale-prompt', expiresAt: '2026-01-01T00:10:00.000Z', prompt: 'Do not send' },
+      )).rejects.toThrow(/fresh, healthy/i)
     } finally {
       await monitor.stop()
     }

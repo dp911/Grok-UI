@@ -4,10 +4,13 @@ import type {
   AgentHostIdentity,
   AgentSessionDetail,
   AgentSnapshot,
+  ControlPermission,
   ControlSession,
   LiveAgent,
   LiveFeedItem,
   RuntimeSnapshot,
+  RemoteSessionSnapshot,
+  RemoteCommandReceipt,
   SessionRow,
   UsageLedgerEntry,
   UsageMetric,
@@ -33,6 +36,11 @@ const CAPABILITIES = new Set<AgentCapability>([
   'workflows.list',
   'runtime.snapshot',
   'usage.report',
+  'remote.sessions',
+  'remote.sessions.create',
+  'remote.sessions.prompt',
+  'remote.sessions.interrupt',
+  'remote.permissions.resolve',
 ])
 
 type RecordValue = Record<string, unknown>
@@ -422,6 +430,11 @@ export function normalizeAgentSnapshot(value: unknown): AgentSnapshot {
     agentVersion: text(item.agentVersion, 80),
     grokVersion: text(item.grokVersion, 80),
     capabilities: capabilities(item.capabilities),
+    managedSessionIds: Array.isArray(item.managedSessionIds)
+      ? item.managedSessionIds.slice(0, MAX_AGENT_SESSIONS)
+        .map((id) => text(id, 160))
+        .filter(Boolean)
+      : [],
     health: {
       status: oneOf(record(item.health).status, ['healthy', 'degraded'] as const, 'degraded'),
       detail: text(record(item.health).detail, 500),
@@ -452,6 +465,7 @@ function scopeId(hostId: string, value: string): string {
 
 export function hostScopeSnapshot(hostId: string, snapshot: AgentSnapshot): AgentSnapshot {
   const sessions = snapshot.sessions.map((session) => ({ ...session, id: scopeId(hostId, session.id) }))
+  const managedSessionIds = snapshot.managedSessionIds.map((id) => scopeId(hostId, id))
   const workflows = snapshot.workflows.map((workflow) => ({
     ...workflow,
     id: scopeId(hostId, workflow.id),
@@ -487,7 +501,7 @@ export function hostScopeSnapshot(hostId: string, snapshot: AgentSnapshot): Agen
       workflowId: scopeId(hostId, entry.workflowId),
     })),
   } : null
-  return { ...snapshot, sessions, workflows, runtime, usage }
+  return { ...snapshot, sessions, managedSessionIds, workflows, runtime, usage }
 }
 
 export function unscopedId(hostId: string, value: string): string {
@@ -568,6 +582,70 @@ export function normalizeAgentSessionDetail(value: unknown): AgentSessionDetail 
       ? item.workflows.slice(0, MAX_AGENT_WORKFLOWS).map(stripRemoteWorkflow)
       : [],
     managed: bool(item.managed),
+  }
+}
+
+function safePermission(value: unknown): ControlPermission | null {
+  const item = record(value)
+  const id = text(item.id, 256)
+  const sessionId = text(item.sessionId, 160)
+  if (!id || !sessionId) return null
+  return {
+    id,
+    sessionId,
+    title: text(item.title, 240),
+    toolKind: text(item.toolKind, 80),
+    toolCallId: text(item.toolCallId, 256),
+    createdAt: date(item.createdAt),
+    options: Array.isArray(item.options)
+      ? item.options.slice(0, 20).flatMap((value) => {
+        const option = record(value)
+        const optionId = text(option.id, 160)
+        return optionId ? [{
+          id: optionId,
+          name: text(option.name, 160),
+          kind: text(option.kind, 80),
+        }] : []
+      })
+      : [],
+  }
+}
+
+export function normalizeRemoteSessionSnapshot(value: unknown): RemoteSessionSnapshot {
+  const item = record(value)
+  const detail = normalizeAgentSessionDetail(item)
+  return {
+    ...detail,
+    revision: text(item.revision, 128),
+    permissions: Array.isArray(item.permissions)
+      ? item.permissions.slice(0, 50)
+        .map(safePermission)
+        .filter((permission): permission is ControlPermission => permission !== null)
+      : [],
+  }
+}
+
+export function normalizeRemoteCommandReceipt(value: unknown): RemoteCommandReceipt {
+  const item = record(value)
+  const commandId = text(item.commandId, 128)
+  const kind = oneOf(
+    item.kind,
+    ['session.create', 'session.prompt', 'session.interrupt', 'permission.resolve'] as const,
+    'session.prompt',
+  )
+  if (!commandId) throw new Error('Remote host returned an invalid command receipt.')
+  return {
+    commandId,
+    kind,
+    status: oneOf(
+      item.status,
+      ['accepted', 'completed', 'failed', 'unknown'] as const,
+      'unknown',
+    ),
+    createdAt: date(item.createdAt),
+    updatedAt: date(item.updatedAt),
+    sessionId: text(item.sessionId, 160),
+    error: text(item.error, 500),
   }
 }
 

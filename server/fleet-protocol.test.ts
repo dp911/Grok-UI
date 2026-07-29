@@ -8,6 +8,7 @@ import {
   normalizeAgentSnapshot,
   protocolCompatible,
   normalizeAgentHello,
+  normalizeRemoteSessionSnapshot,
 } from './fleet-protocol.js'
 
 function rawSnapshot() {
@@ -146,5 +147,42 @@ describe('fleet protocol normalization', () => {
       host: {},
       capabilities: [],
     }))).toBe(false)
+  })
+
+  it('bounds exact remote permissions and never restores stripped workflow handles', () => {
+    const snapshot = normalizeRemoteSessionSnapshot({
+      protocolVersion: 1,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      revision: 'revision-1',
+      hostId: 'remote',
+      session: { id: 'session-1' },
+      transcript: [],
+      live: null,
+      control: null,
+      workflows: [{
+        id: 'workflow-1',
+        sessionId: 'session-1',
+        controlHandle: 'do-not-expose',
+        canStop: true,
+        phases: [],
+        agents: [],
+      }],
+      permissions: Array.from({ length: 60 }, (_, index) => ({
+        id: `permission-${index}`,
+        sessionId: 'session-1',
+        options: Array.from({ length: 30 }, (_option, optionIndex) => ({
+          id: `option-${optionIndex}`,
+          name: 'Allow once',
+          kind: 'allow_once',
+        })),
+      })),
+      managed: true,
+    })
+    expect(snapshot.permissions).toHaveLength(50)
+    expect(snapshot.permissions[0].options).toHaveLength(20)
+    expect(snapshot.workflows[0]).toMatchObject({
+      controlHandle: '',
+      canStop: false,
+    })
   })
 })

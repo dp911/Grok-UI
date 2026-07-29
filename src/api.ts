@@ -7,10 +7,13 @@ import type {
   FleetHostMutationResponse,
   FleetHostView,
   FleetSnapshot,
+  PreviewSnapshot,
   SessionRow,
   SessionWorkbenchData,
   LiveSnapshot,
   RuntimeSnapshot,
+  RemoteCommandReceipt,
+  RemoteSessionSnapshot,
   SetupStatus,
   UsageGroupDimension,
   UsageBudget,
@@ -86,6 +89,7 @@ function parseFleetHost(value: unknown): FleetHostView {
     || !FLEET_STATUSES.has(String(host.status))
     || !config
     || 'token' in config
+    || 'controlToken' in config
   ) {
     throw new Error('Fleet registry returned an invalid public host record')
   }
@@ -95,6 +99,8 @@ function parseFleetHost(value: unknown): FleetHostView {
     && (
       !Array.isArray(snapshot.sessions)
       || snapshot.sessions.length > 200
+      || !Array.isArray(snapshot.managedSessionIds)
+      || snapshot.managedSessionIds.length > 200
       || !Array.isArray(snapshot.workflows)
       || snapshot.workflows.length > 100
       || (record(snapshot.usage) && Array.isArray(record(snapshot.usage)?.entries)
@@ -128,7 +134,13 @@ export function parseFleetSnapshot(value: unknown): FleetSnapshot {
 function parseFleetMutation(value: unknown): FleetHostMutationResponse {
   const result = record(value)
   const publicHost = record(result?.host)
-  if (!result || !publicHost || typeof publicHost.id !== 'string' || 'token' in publicHost) {
+  if (
+    !result
+    || !publicHost
+    || typeof publicHost.id !== 'string'
+    || 'token' in publicHost
+    || 'controlToken' in publicHost
+  ) {
     throw new Error('Fleet registry returned an invalid mutation response')
   }
   return {
@@ -180,6 +192,58 @@ export function parseFleetSessionDetail(value: unknown): AgentSessionDetail {
     throw new Error('Remote session detail exceeded its read-only protocol bounds')
   }
   return detail as unknown as AgentSessionDetail
+}
+
+export function parseRemoteSessionSnapshot(value: unknown): RemoteSessionSnapshot {
+  const snapshot = record(value)
+  const session = record(snapshot?.session)
+  const transcript = snapshot?.transcript
+  const permissions = snapshot?.permissions
+  const workflows = snapshot?.workflows
+  if (
+    !snapshot
+    || typeof snapshot.protocolVersion !== 'number'
+    || typeof snapshot.generatedAt !== 'string'
+    || typeof snapshot.revision !== 'string'
+    || typeof snapshot.hostId !== 'string'
+    || !session
+    || typeof session.id !== 'string'
+    || !Array.isArray(transcript)
+    || transcript.length > 200
+    || !Array.isArray(permissions)
+    || permissions.length > 50
+    || !Array.isArray(workflows)
+    || workflows.length > 100
+    || 'token' in snapshot
+    || 'controlToken' in snapshot
+  ) {
+    throw new Error('Remote session returned an invalid control snapshot')
+  }
+  const invalidPermission = permissions.some((value) => {
+    const permission = record(value)
+    return !permission
+      || typeof permission.id !== 'string'
+      || typeof permission.sessionId !== 'string'
+      || !Array.isArray(permission.options)
+      || permission.options.length > 20
+  })
+  if (invalidPermission) throw new Error('Remote permission list exceeded its protocol bounds')
+  return snapshot as unknown as RemoteSessionSnapshot
+}
+
+function parseRemoteCommandReceipt(value: unknown): RemoteCommandReceipt {
+  const receipt = record(value)
+  if (
+    !receipt
+    || typeof receipt.commandId !== 'string'
+    || !['session.create', 'session.prompt', 'session.interrupt', 'permission.resolve'].includes(String(receipt.kind))
+    || !['accepted', 'completed', 'failed', 'unknown'].includes(String(receipt.status))
+    || typeof receipt.sessionId !== 'string'
+    || typeof receipt.error !== 'string'
+  ) {
+    throw new Error('Remote host returned an invalid command receipt')
+  }
+  return receipt as unknown as RemoteCommandReceipt
 }
 
 export async function getDashboard(force = false): Promise<DashboardPayload> {
@@ -463,4 +527,116 @@ export async function getFleetSessionDetail(hostId: string, sessionId: string): 
     ),
     'Remote session request failed',
   ))
+}
+
+export async function getRemoteSession(
+  hostId: string,
+  sessionId: string,
+): Promise<RemoteSessionSnapshot> {
+  return parseRemoteSessionSnapshot(await json(
+    await boundedFetch(
+      `/api/fleet/hosts/${encodeURIComponent(hostId)}/remote-sessions/${encodeURIComponent(sessionId)}`,
+      { headers: { Accept: 'application/json' } },
+    ),
+    'Remote session request failed',
+  ))
+}
+
+export function remoteSessionEventsUrl(hostId: string, sessionId: string): string {
+  return `/api/fleet/hosts/${encodeURIComponent(hostId)}/remote-sessions/${encodeURIComponent(sessionId)}/events`
+}
+
+async function remoteCommand(
+  url: string,
+  body: Record<string, unknown>,
+  fallback: string,
+): Promise<RemoteCommandReceipt> {
+  const receipt = parseRemoteCommandReceipt(await json(
+    await boundedFetch(url, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    fallback,
+  ))
+  if (receipt.status === 'failed') throw new Error(receipt.error || fallback)
+  return receipt
+}
+
+export async function startRemoteSession(hostId: string, input: {
+  commandId: string
+  expiresAt: string
+  cwd: string
+  prompt: string
+  model?: string
+  reasoningEffort?: string
+}): Promise<RemoteCommandReceipt> {
+  return remoteCommand(
+    `/api/fleet/hosts/${encodeURIComponent(hostId)}/remote-sessions`,
+    input,
+    'Unable to start the remote session',
+  )
+}
+
+export async function promptRemoteSession(
+  hostId: string,
+  sessionId: string,
+  commandId: string,
+  expiresAt: string,
+  prompt: string,
+): Promise<RemoteCommandReceipt> {
+  return remoteCommand(
+    `/api/fleet/hosts/${encodeURIComponent(hostId)}/remote-sessions/${encodeURIComponent(sessionId)}/prompt`,
+    { commandId, expiresAt, prompt },
+    'Unable to send the remote follow-up',
+  )
+}
+
+export async function interruptRemoteSession(
+  hostId: string,
+  sessionId: string,
+  commandId: string,
+  expiresAt: string,
+): Promise<RemoteCommandReceipt> {
+  return remoteCommand(
+    `/api/fleet/hosts/${encodeURIComponent(hostId)}/remote-sessions/${encodeURIComponent(sessionId)}/interrupt`,
+    { commandId, expiresAt },
+    'Unable to interrupt the remote turn',
+  )
+}
+
+export async function resolveRemotePermission(
+  hostId: string,
+  sessionId: string,
+  permissionId: string,
+  commandId: string,
+  expiresAt: string,
+  optionId?: string,
+): Promise<RemoteCommandReceipt> {
+  return remoteCommand(
+    `/api/fleet/hosts/${encodeURIComponent(hostId)}/remote-sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permissionId)}`,
+    { commandId, expiresAt, optionId },
+    'Unable to resolve the remote permission',
+  )
+}
+
+export async function getSessionPreview(sessionId: string): Promise<PreviewSnapshot> {
+  return json(
+    await boundedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview`, {
+      headers: { Accept: 'application/json' },
+    }),
+    'Preview request failed',
+  )
+}
+
+export async function startSessionPreview(sessionId: string): Promise<PreviewSnapshot> {
+  return json(await boundedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview/start`, {
+    method: 'POST',
+  }), 'Unable to start preview')
+}
+
+export async function stopSessionPreview(sessionId: string): Promise<PreviewSnapshot> {
+  return json(await boundedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview/stop`, {
+    method: 'POST',
+  }), 'Unable to stop preview')
 }

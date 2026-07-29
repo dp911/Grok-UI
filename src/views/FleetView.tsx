@@ -22,7 +22,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { refreshFleetHost } from '../api'
 import { usePrivacy } from '../privacy'
-import type { FleetHostView, FleetSnapshot } from '../types'
+import type { FleetHostView, FleetSnapshot, SessionRow } from '../types'
 import { HostEditor } from './fleet/HostEditor'
 import {
   emptyFleet,
@@ -68,12 +68,14 @@ export function FleetView({
   error: fleetError,
   onReload,
   onFleetChange,
+  onOpenRemoteSession,
 }: {
   fleet: FleetSnapshot | null
   streamConnected: boolean
   error: string
   onReload: () => Promise<void>
   onFleetChange: (fleet: FleetSnapshot) => void
+  onOpenRemoteSession: (host: FleetHostView, session: SessionRow) => void
 }) {
   const privacy = usePrivacy()
   const hosts = fleet?.hosts || []
@@ -155,8 +157,8 @@ export function FleetView({
           <h1>Every host.<br /><em>One quiet orbit.</em></h1>
         </div>
         <p>
-          Authenticated, read-only telemetry across trusted SSH and Tailscale links.
-          Remote commands stay outside this release.
+          Monitor every trusted host, then continue opted-in Grok Build sessions through
+          an authenticated Tailscale or SSH connection.
         </p>
         <div className="intro-rule"><span /></div>
       </header>
@@ -183,7 +185,7 @@ export function FleetView({
         </div>
         <div className="fleet-trust-note">
           <ShieldCheck size={16} />
-          <span><strong>REMOTE / READ ONLY</strong> Session, workflow, runtime, and usage snapshots only.</span>
+          <span><strong>HOST-AUTHORIZED</strong> Monitoring stays read-only unless a host explicitly enables secure remote sessions.</span>
         </div>
       </section>
 
@@ -283,7 +285,10 @@ export function FleetView({
                 </p>
               </div>
               <div className="fleet-host-actions">
-                <span className="fleet-readonly-lock"><ShieldCheck size={14} /> Read only</span>
+                <span className="fleet-readonly-lock">
+                  <ShieldCheck size={14} />
+                  {selected.config.controlEnabled ? 'Remote sessions enabled' : 'Read only'}
+                </span>
                 <button
                   type="button"
                   onClick={() => void refreshHost(selected)}
@@ -337,7 +342,9 @@ export function FleetView({
               aria-label={`${TABS.find((item) => item.id === tab)?.label} for ${privacy.host(selected.label, selected.id)}`}
             >
               {tab === 'overview' && <FleetOverview host={selected} />}
-              {tab === 'sessions' && <FleetSessions host={selected} />}
+              {tab === 'sessions' && (
+                <FleetSessions host={selected} onOpenRemoteSession={onOpenRemoteSession} />
+              )}
               {tab === 'workflows' && <FleetWorkflows host={selected} />}
               {tab === 'runtime' && <FleetRuntime host={selected} />}
               {tab === 'usage' && <FleetUsage host={selected} />}

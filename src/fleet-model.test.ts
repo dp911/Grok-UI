@@ -28,6 +28,7 @@ function host(status: FleetHostView['status'], withSnapshot: boolean): FleetHost
           agentVersion: '0.10.0',
           grokVersion: '',
           capabilities: [],
+          managedSessionIds: [],
           health: { status: 'healthy', detail: '' },
           sessions: [],
           workflows: [],

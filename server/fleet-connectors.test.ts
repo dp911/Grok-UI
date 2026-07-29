@@ -42,6 +42,8 @@ function host(port: number): FleetHostConfig {
     transport: 'direct',
     baseUrl: `http://127.0.0.1:${port}`,
     token: 'connector-secret',
+    controlToken: 'control-secret',
+    controlEnabled: true,
     sshTarget: '',
     sshPort: 22,
     localPort: 0,
@@ -92,5 +94,38 @@ describe('DefaultFleetConnector', () => {
       .rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
     await expect(connector.getJson(host(port), '/agent/v1/large'))
       .rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
+  })
+
+  it('posts only allowlisted remote commands with the separate control token', async () => {
+    let observedAuthorization = ''
+    let observedBody = ''
+    const server = http.createServer((request, response) => {
+      observedAuthorization = request.headers.authorization || ''
+      request.setEncoding('utf8')
+      request.on('data', (chunk) => {
+        observedBody += chunk
+      })
+      request.on('end', () => response.end(JSON.stringify({ status: 'completed' })))
+    })
+    const port = await listen(server)
+    const connector = new DefaultFleetConnector()
+    await expect(connector.postControlJson(
+      host(port),
+      '/agent/control/v1/sessions/session-1/prompt',
+      { commandId: 'command-1', prompt: 'Continue' },
+    )).resolves.toEqual({ status: 'completed' })
+    expect(observedAuthorization).toBe('Bearer control-secret')
+    expect(JSON.parse(observedBody)).toEqual({ commandId: 'command-1', prompt: 'Continue' })
+
+    await expect(connector.postControlJson(
+      host(port),
+      '/agent/control/v1/arbitrary',
+      { commandId: 'command-2' },
+    )).rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
+    await expect(connector.postControlJson(
+      host(port),
+      'https://example.com/agent/control/v1/sessions',
+      { commandId: 'command-3' },
+    )).rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
   })
 })

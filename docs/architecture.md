@@ -2,7 +2,9 @@
 
 Grok UI is a local-first developer tool. Its existing runtime, control, usage,
 durable-state, workspace, and browser-security planes remain authoritative on
-each machine. v0.10 adds a read-only fleet plane over those projections.
+each machine. v0.10 adds a read-only fleet plane over those projections. v0.11
+adds an optional, separately authenticated remote-session plane while keeping
+each host's local ACP controller authoritative.
 
 ## Runtime plane
 
@@ -56,6 +58,23 @@ through `session/load` and `session/prompt`.
 `WorkspaceInspector` runs argument-separated Git commands against workspaces associated with recorded or controlled Grok sessions. It never invokes a shell.
 
 Diff paths are resolved beneath the repository root. Reads are bounded, binary content is not rendered, and untracked files are represented without leaving the repository.
+
+## Preview plane
+
+`PreviewSupervisor` detects package scripts only inside the workspace
+associated with a known local session. The browser cannot provide an arbitrary
+working directory or command.
+
+Starting a preview chooses an ephemeral port, passes loopback host and port
+settings to the detected package script, and spawns the executable with
+argument separation and no shell. Grok, token, secret, password, credential,
+and API-key environment variables are excluded. Output is stripped of terminal
+control sequences and kept as a bounded in-memory tail. Preview processes are
+not restored after a restart and are stopped during graceful shutdown.
+
+The application iframe uses the preview's separate loopback origin and a
+sandbox. Grok UI credentials and authentication cookies are not forwarded to
+the child process.
 
 ## Network boundary
 
@@ -167,6 +186,53 @@ values in the browser. As with local data, it is a screen-sharing safeguard
 rather than an authorization boundary: an authenticated browser can receive
 the underlying operational fleet contract.
 
+## Remote session plane
+
+The v0.11 control plane is parallel to, not an expansion of, the read-only
+`/agent/v1/` surface. A host advertises remote-session capabilities only when
+started with a dedicated control token. The central registry independently
+stores that token and an explicit enable flag. The monitoring and control
+tokens must differ and neither reaches the browser.
+
+The control connector accepts only these versioned operations:
+
+| Method and route | Purpose |
+| --- | --- |
+| `GET /agent/control/v1/sessions/:id` | Read a bounded managed-session snapshot |
+| `POST /agent/control/v1/sessions` | Start in a previously observed workspace |
+| `POST /agent/control/v1/sessions/:id/prompt` | Send a natural-language follow-up |
+| `POST /agent/control/v1/sessions/:id/interrupt` | Interrupt the active turn |
+| `POST /agent/control/v1/sessions/:id/permissions/:permissionId` | Select an option advertised by Grok |
+
+There is no generic command, shell, file-write, arbitrary fetch, or workflow
+mutation route. The host's `GrokController` owns session attachment, ACP
+messages, pending permission promises, and cancellation. The central
+`FleetMonitor` carries constrained intent only after checking registry opt-in,
+healthy connection, fresh observation, compatibility, and the action-specific
+capability. Each remote session and permission identifier is namespaced by host
+at the browser boundary.
+
+Each mutation includes a command ID and bounded expiry. `RemoteCommandStore`
+hashes the canonical payload, persists acceptance before execution, joins
+concurrent retries, and returns the stored outcome for the same command. Reusing
+an ID for another action, target, actor, expiry, or payload is rejected.
+Expired deliveries are rejected even after detailed records are compacted, and
+the host applies backpressure rather than evicting unexpired replay protection.
+Commands that were accepted or executing when the host restarts become
+`unknown`; they are never automatically replayed.
+
+The versioned, bounded `remote-commands.json` file is atomic and user-private.
+Its audit transitions contain identifiers, action, target, credential
+fingerprint, time, and outcome, but not prompts or transcripts.
+Raw ACP/provider errors are reduced to a stable public failure message before
+they enter either the file or command receipt.
+
+The Remote Session Console uses a dedicated SSE stream. The central server
+polls the host on a bounded cadence, emits changed session revisions and
+heartbeats, and reloads the full bounded snapshot after reconnect. Existing
+transcript remains visible as historical context, but server-side mutation
+gates prevent a stale browser from acting blindly.
+
 ## Repository ownership
 
 The canonical architecture document remains this lowercase file. Do not create
@@ -182,12 +248,15 @@ a second `ARCHITECTURE.md`; update this map when ownership moves.
 | Read-only remote telemetry panels | `src/views/fleet/panels/` |
 | Fleet-only visual rules | `src/styles/fleet.css` |
 | Host-agent HTTP boundary and local observer composition | `server/host-agent.ts` |
+| Durable remote command reconciliation and audit evidence | `server/remote-command-store.ts` |
 | Shared local session-to-row projection | `server/session-projection.ts` |
 | Wire parsing, caps, namespacing, and control stripping | `server/fleet-protocol.ts` |
 | Atomic registry persistence and registry validation | `server/fleet-registry.ts` |
 | Fixed-path HTTP/Tailscale/SSH connectivity | `server/fleet-connectors.ts` |
 | Polling, compatibility, health, freshness, and aggregation | `server/fleet-monitor.ts` |
 | Central authenticated routes and local composition root | `server/index.ts` |
+| Local loopback preview lifecycle and bounded logs | `server/preview-supervisor.ts` |
+| Remote managed-session console | `src/views/RemoteSessionWorkbench.tsx` |
 | Durable local session/usage state | `server/session-state.ts`, `server/usage-ledger.ts` |
 
 Dependencies flow from page and panel rendering into shared client types and

@@ -28,6 +28,8 @@ describe('FleetRegistryStore', () => {
       transport: 'direct',
       baseUrl: 'http://127.0.0.1:4311',
       token: 'fleet-secret',
+      controlToken: 'control-secret',
+      controlEnabled: true,
     })
     const stat = await fs.stat(store.file)
     const directoryStat = await fs.stat(store.directory)
@@ -36,12 +38,23 @@ describe('FleetRegistryStore', () => {
     expect(publicHostConfig(host)).toMatchObject({
       id: host.id,
       hasToken: true,
+      hasControlToken: true,
+      controlEnabled: true,
     })
     expect(publicHostConfig(host)).not.toHaveProperty('token')
+    expect(publicHostConfig(host)).not.toHaveProperty('controlToken')
 
     const restored = new FleetRegistryStore(store.directory)
     await restored.load()
     expect(restored.get(host.id)?.token).toBe('fleet-secret')
+    expect(restored.get(host.id)?.controlToken).toBe('control-secret')
+    await expect(store.create({
+      label: 'Missing control credential',
+      transport: 'direct',
+      baseUrl: 'http://127.0.0.1:4312',
+      token: 'read-secret',
+      controlEnabled: true,
+    })).rejects.toThrow(/control token/i)
   })
 
   it('restricts direct and Tailscale destinations and builds one fixed SSH tunnel', async () => {

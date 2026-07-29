@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { parseFleetSessionDetail, parseFleetSnapshot } from './api'
+import {
+  parseFleetSessionDetail,
+  parseFleetSnapshot,
+  parseRemoteSessionSnapshot,
+} from './api'
 
 function host(overrides: Record<string, unknown> = {}) {
   return {
@@ -32,6 +36,8 @@ function host(overrides: Record<string, unknown> = {}) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       hasToken: true,
+      controlEnabled: false,
+      hasControlToken: false,
     },
     ...overrides,
   }
@@ -118,5 +124,34 @@ describe('fleet client boundary', () => {
       ...detail,
       transcript: Array.from({ length: 201 }, (_, index) => ({ id: String(index), text: '' })),
     })).toThrow(/invalid bounded detail/i)
+  })
+
+  it('accepts bounded remote permissions while rejecting secrets and oversized queues', () => {
+    const snapshot = {
+      protocolVersion: 1,
+      generatedAt: new Date().toISOString(),
+      revision: 'revision-1',
+      hostId: 'host-1',
+      session: { id: 'host-1:session-1' },
+      transcript: [],
+      live: null,
+      control: null,
+      workflows: [],
+      permissions: [{
+        id: 'host-1:permission-1',
+        sessionId: 'host-1:session-1',
+        options: [{ id: 'allow-once', name: 'Allow once', kind: 'allow_once' }],
+      }],
+      managed: true,
+    }
+    expect(parseRemoteSessionSnapshot(snapshot).permissions[0].options[0].id).toBe('allow-once')
+    expect(() => parseRemoteSessionSnapshot({
+      ...snapshot,
+      controlToken: 'must-not-reach-the-browser',
+    })).toThrow(/invalid control snapshot/i)
+    expect(() => parseRemoteSessionSnapshot({
+      ...snapshot,
+      permissions: Array.from({ length: 51 }, () => snapshot.permissions[0]),
+    })).toThrow(/invalid control snapshot/i)
   })
 })

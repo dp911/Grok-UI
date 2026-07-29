@@ -6,6 +6,8 @@ import {
   normalizeAgentHello,
   normalizeAgentSessionDetail,
   normalizeAgentSnapshot,
+  normalizeRemoteCommandReceipt,
+  normalizeRemoteSessionSnapshot,
   normalizeUsageReport,
   protocolCompatible,
   unscopedId,
@@ -18,6 +20,7 @@ import {
 import { publicHostConfig, type FleetRegistryStore } from './fleet-registry.js'
 import type {
   AgentHello,
+  AgentCapability,
   AgentSessionDetail,
   AgentSnapshot,
   FleetFreshness,
@@ -25,6 +28,8 @@ import type {
   FleetHostStatus,
   FleetHostView,
   FleetSnapshot,
+  RemoteCommandReceipt,
+  RemoteSessionSnapshot,
   UsageGroupDimension,
   UsagePeriod,
   UsageReport,
@@ -239,6 +244,8 @@ export class FleetMonitor extends EventEmitter {
       const connectionChanged = previous.config.transport !== config.transport
         || previous.config.baseUrl !== config.baseUrl
         || previous.config.token !== config.token
+        || previous.config.controlToken !== config.controlToken
+        || previous.config.controlEnabled !== config.controlEnabled
         || previous.config.sshTarget !== config.sshTarget
         || previous.config.sshPort !== config.sshPort
         || previous.config.localPort !== config.localPort
@@ -385,6 +392,78 @@ export class FleetMonitor extends EventEmitter {
     return detail
   }
 
+  async remoteSession(hostId: string, sessionId: string): Promise<RemoteSessionSnapshot> {
+    const state = this.controlState(hostId, 'remote.sessions')
+    const localId = unscopedId(hostId, sessionId)
+    const connector = this.connector.getControlJson
+    if (!connector) throw new Error('Remote-session transport is unavailable.')
+    const value = await this.withConnection(() => connector.call(
+      this.connector,
+      state.config,
+      `/agent/control/v1/sessions/${encodeURIComponent(localId)}`,
+    ))
+    return this.scopeRemoteSession(hostId, normalizeRemoteSessionSnapshot(value))
+  }
+
+  async createRemoteSession(hostId: string, input: {
+    commandId: string
+    expiresAt: string
+    cwd: string
+    prompt: string
+    model?: string
+    reasoningEffort?: string
+  }): Promise<RemoteCommandReceipt> {
+    const state = this.controlState(hostId, 'remote.sessions.create')
+    return this.remoteCommand(state, '/agent/control/v1/sessions', input, hostId)
+  }
+
+  async promptRemoteSession(
+    hostId: string,
+    sessionId: string,
+    input: { commandId: string; expiresAt: string; prompt: string },
+  ): Promise<RemoteCommandReceipt> {
+    const state = this.controlState(hostId, 'remote.sessions.prompt')
+    const localId = unscopedId(hostId, sessionId)
+    return this.remoteCommand(
+      state,
+      `/agent/control/v1/sessions/${encodeURIComponent(localId)}/prompt`,
+      input,
+      hostId,
+    )
+  }
+
+  async interruptRemoteSession(
+    hostId: string,
+    sessionId: string,
+    input: { commandId: string; expiresAt: string },
+  ): Promise<RemoteCommandReceipt> {
+    const state = this.controlState(hostId, 'remote.sessions.interrupt')
+    const localId = unscopedId(hostId, sessionId)
+    return this.remoteCommand(
+      state,
+      `/agent/control/v1/sessions/${encodeURIComponent(localId)}/interrupt`,
+      input,
+      hostId,
+    )
+  }
+
+  async resolveRemotePermission(
+    hostId: string,
+    sessionId: string,
+    permissionId: string,
+    input: { commandId: string; expiresAt: string; optionId?: string },
+  ): Promise<RemoteCommandReceipt> {
+    const state = this.controlState(hostId, 'remote.permissions.resolve')
+    const localSessionId = unscopedId(hostId, sessionId)
+    const localPermissionId = unscopedId(hostId, permissionId)
+    return this.remoteCommand(
+      state,
+      `/agent/control/v1/sessions/${encodeURIComponent(localSessionId)}/permissions/${encodeURIComponent(localPermissionId)}`,
+      input,
+      hostId,
+    )
+  }
+
   async usage(
     hostId: string,
     period: UsagePeriod,
@@ -405,6 +484,69 @@ export class FleetMonitor extends EventEmitter {
         sessionId: `${hostId}:${entry.sessionId}`,
         workflowId: entry.workflowId ? `${hostId}:${entry.workflowId}` : '',
       })),
+    }
+  }
+
+  private controlState(hostId: string, capability: AgentCapability): HostState {
+    const state = this.states.get(hostId)
+    if (!state?.config.enabled) throw new Error('Fleet host was not found or is disabled.')
+    if (!state.config.controlEnabled || !state.config.controlToken) {
+      throw new Error('Secure remote sessions are not enabled for this host.')
+    }
+    const currentStatus = visibleStatus(state, this.now())
+    const currentFreshness = freshness(state, this.now())
+    if (currentStatus !== 'healthy' || currentFreshness !== 'fresh') {
+      throw new Error('Remote control requires a fresh, healthy host connection.')
+    }
+    const capabilities = state.hello?.capabilities || state.snapshot?.capabilities || []
+    if (!capabilities.includes(capability)) {
+      throw new Error(`Remote host does not advertise ${capability}.`)
+    }
+    return state
+  }
+
+  private scopeRemoteSession(
+    hostId: string,
+    snapshot: RemoteSessionSnapshot,
+  ): RemoteSessionSnapshot {
+    const scope = (value: string) => value ? `${hostId}:${value}` : ''
+    return {
+      ...snapshot,
+      hostId,
+      session: { ...snapshot.session, id: scope(snapshot.session.id) },
+      live: snapshot.live ? { ...snapshot.live, id: scope(snapshot.live.id) } : null,
+      control: snapshot.control ? { ...snapshot.control, id: scope(snapshot.control.id) } : null,
+      workflows: snapshot.workflows.map((workflow) => ({
+        ...workflow,
+        id: scope(workflow.id),
+        sessionId: scope(workflow.sessionId),
+      })),
+      permissions: snapshot.permissions.map((permission) => ({
+        ...permission,
+        id: scope(permission.id),
+        sessionId: scope(permission.sessionId),
+      })),
+    }
+  }
+
+  private async remoteCommand(
+    state: HostState,
+    fixedPath: string,
+    body: unknown,
+    hostId: string,
+  ): Promise<RemoteCommandReceipt> {
+    const connector = this.connector.postControlJson
+    if (!connector) throw new Error('Remote-session transport is unavailable.')
+    const value = await this.withConnection(() => connector.call(
+      this.connector,
+      state.config,
+      fixedPath,
+      body,
+    ))
+    const receipt = normalizeRemoteCommandReceipt(value)
+    return {
+      ...receipt,
+      sessionId: receipt.sessionId ? `${hostId}:${receipt.sessionId}` : '',
     }
   }
 
@@ -534,6 +676,10 @@ export class FleetMonitor extends EventEmitter {
   }
 
   private async getJson(config: FleetHostConfig, fixedPath: string): Promise<unknown> {
+    return this.withConnection(() => this.connector.getJson(config, fixedPath))
+  }
+
+  private async withConnection<T>(operation: () => Promise<T>): Promise<T> {
     await new Promise<void>((resolve) => {
       if (this.activeConnections < FLEET_MAX_CONCURRENCY) {
         this.activeConnections += 1
@@ -546,7 +692,7 @@ export class FleetMonitor extends EventEmitter {
       })
     })
     try {
-      return await this.connector.getJson(config, fixedPath)
+      return await operation()
     } finally {
       this.activeConnections -= 1
       this.connectionWaiters.shift()?.()

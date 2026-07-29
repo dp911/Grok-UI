@@ -512,12 +512,19 @@ export type AgentCapability =
   | 'workflows.list'
   | 'runtime.snapshot'
   | 'usage.report'
+  | 'remote.sessions'
+  | 'remote.sessions.create'
+  | 'remote.sessions.prompt'
+  | 'remote.sessions.interrupt'
+  | 'remote.permissions.resolve'
 
 export interface FleetHostInput {
   label?: string
   transport?: FleetTransportKind
   baseUrl?: string
   token?: string
+  controlToken?: string
+  controlEnabled?: boolean
   sshTarget?: string
   sshPort?: number
   localPort?: number
@@ -531,6 +538,8 @@ export interface FleetHostConfig {
   transport: FleetTransportKind
   baseUrl: string
   token: string
+  controlToken: string
+  controlEnabled?: boolean
   sshTarget: string
   sshPort: number
   localPort: number
@@ -540,8 +549,9 @@ export interface FleetHostConfig {
   updatedAt: string
 }
 
-export interface FleetHostPublicConfig extends Omit<FleetHostConfig, 'token'> {
+export interface FleetHostPublicConfig extends Omit<FleetHostConfig, 'token' | 'controlToken'> {
   hasToken: boolean
+  hasControlToken?: boolean
 }
 
 export interface AgentHostIdentity {
@@ -560,6 +570,7 @@ export interface AgentSnapshot {
   agentVersion: string
   grokVersion: string
   capabilities: AgentCapability[]
+  managedSessionIds: string[]
   health: {
     status: 'healthy' | 'degraded'
     detail: string
@@ -590,6 +601,38 @@ export interface AgentSessionDetail {
   live: LiveAgent | null
   control: Omit<ControlSession, 'workflows'> | null
   workflows: WorkflowRun[]
+  managed: boolean
+}
+
+export type RemoteCommandKind =
+  | 'session.create'
+  | 'session.prompt'
+  | 'session.interrupt'
+  | 'permission.resolve'
+
+export type RemoteCommandStatus = 'accepted' | 'completed' | 'failed' | 'unknown'
+
+export interface RemoteCommandReceipt {
+  commandId: string
+  kind: RemoteCommandKind
+  status: RemoteCommandStatus
+  createdAt: string
+  updatedAt: string
+  sessionId: string
+  error: string
+}
+
+export interface RemoteSessionSnapshot {
+  protocolVersion: number
+  generatedAt: string
+  revision: string
+  hostId: string
+  session: SessionRow
+  transcript: LiveFeedItem[]
+  live: LiveAgent | null
+  control: Omit<ControlSession, 'workflows'> | null
+  workflows: WorkflowRun[]
+  permissions: ControlPermission[]
   managed: boolean
 }
 
@@ -635,4 +678,22 @@ export interface FleetSnapshot {
 export interface FleetHostMutationResponse {
   host: FleetHostPublicConfig
   fleet: FleetSnapshot
+}
+
+export type PreviewStatus = 'idle' | 'starting' | 'running' | 'failed' | 'stopped'
+
+export interface PreviewSnapshot {
+  sessionId: string
+  cwd: string
+  available: boolean
+  status: PreviewStatus
+  command: string
+  args: string[]
+  displayCommand: string
+  port: number
+  url: string
+  startedAt: string
+  updatedAt: string
+  error: string
+  logs: string[]
 }

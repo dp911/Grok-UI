@@ -30,6 +30,7 @@ import { usageExport, type UsageExportFormat } from './usage-export.js'
 import { FleetRegistryStore, publicHostConfig } from './fleet-registry.js'
 import { FleetMonitor } from './fleet-monitor.js'
 import { controlSessionRow, liveAgentRow } from './session-projection.js'
+import { PreviewSupervisor } from './preview-supervisor.js'
 
 const app = express()
 const sessionState = new SessionStateStore()
@@ -42,6 +43,7 @@ const controller = new GrokController(sessionState)
 await controller.restore()
 const workspaceInspector = new WorkspaceInspector()
 const sessionReader = new SessionReader(store.grokHome)
+const previewSupervisor = new PreviewSupervisor()
 const usageLedger = new UsageLedger(sessionState)
 const usageBudgets = new UsageBudgetManager(sessionState, usageLedger)
 const runtimeInspector = new RuntimeInspector()
@@ -50,7 +52,35 @@ const port = Number(process.env.PORT || 4310)
 const host = process.env.HOST || '127.0.0.1'
 const security = new SecurityGate(host)
 const eventClients = new Set<express.Response>()
+const MAX_REMOTE_SESSION_STREAMS = 16
+let remoteSessionStreams = 0
 let usageSyncTimer: NodeJS.Timeout | null = null
+const REMOTE_COMMAND_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/
+
+function remoteControlStatus(message: string): number {
+  if (message.includes('not found')) return 404
+  if (
+    message.includes('not enabled')
+    || message.includes('fresh, healthy')
+    || message.includes('does not advertise')
+    || message.includes('no longer pending')
+  ) return 409
+  return 503
+}
+
+function requiredCommandId(value: unknown): string {
+  if (typeof value !== 'string' || !REMOTE_COMMAND_ID.test(value)) {
+    throw new Error('A valid commandId is required.')
+  }
+  return value
+}
+
+function requiredCommandExpiry(value: unknown): string {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    throw new Error('A valid expiresAt is required.')
+  }
+  return value
+}
 
 function broadcast(event: string, payload: unknown) {
   const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
@@ -195,6 +225,138 @@ app.get('/api/fleet/hosts/:id/sessions/:sessionId', async (request, response) =>
     response.status(message.includes('not found') ? 404 : 503).json({ error: message })
   }
 })
+
+app.get('/api/fleet/hosts/:id/remote-sessions/:sessionId', async (request, response) => {
+  try {
+    response.json(await fleetMonitor.remoteSession(request.params.id, request.params.sessionId))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Remote session is unavailable.'
+    response.status(remoteControlStatus(message)).json({ error: message })
+  }
+})
+
+app.get('/api/fleet/hosts/:id/remote-sessions/:sessionId/events', async (request, response) => {
+  if (remoteSessionStreams >= MAX_REMOTE_SESSION_STREAMS) {
+    response.status(429).json({ error: 'Too many remote session streams are open.' })
+    return
+  }
+  remoteSessionStreams += 1
+  response.setHeader('Content-Type', 'text/event-stream')
+  response.setHeader('Cache-Control', 'no-cache, no-store')
+  response.setHeader('Connection', 'keep-alive')
+  response.flushHeaders()
+  let closed = false
+  let inFlight = false
+  let revision = ''
+  let lastError = ''
+  let lastHeartbeat = 0
+  const send = async () => {
+    if (closed || inFlight) return
+    inFlight = true
+    try {
+      const snapshot = await fleetMonitor.remoteSession(request.params.id, request.params.sessionId)
+      if (snapshot.revision !== revision) {
+        revision = snapshot.revision
+        lastError = ''
+        response.write(`event: session\ndata: ${JSON.stringify(snapshot)}\n\n`)
+      } else if (Date.now() - lastHeartbeat >= 15_000) {
+        lastHeartbeat = Date.now()
+        response.write(`event: heartbeat\ndata: ${JSON.stringify({ generatedAt: new Date().toISOString() })}\n\n`)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Remote session stream is unavailable.'
+      if (message !== lastError || Date.now() - lastHeartbeat >= 15_000) {
+        lastError = message
+        lastHeartbeat = Date.now()
+        response.write(`event: session-error\ndata: ${JSON.stringify({ error: message })}\n\n`)
+      }
+    } finally {
+      inFlight = false
+    }
+  }
+  const timer = setInterval(() => void send(), 900)
+  timer.unref()
+  request.once('close', () => {
+    closed = true
+    clearInterval(timer)
+    remoteSessionStreams = Math.max(0, remoteSessionStreams - 1)
+  })
+  await send()
+})
+
+app.post('/api/fleet/hosts/:id/remote-sessions', async (request, response) => {
+  try {
+    response.status(202).json(await fleetMonitor.createRemoteSession(request.params.id, {
+      commandId: requiredCommandId(request.body?.commandId),
+      expiresAt: requiredCommandExpiry(request.body?.expiresAt),
+      cwd: typeof request.body?.cwd === 'string' ? request.body.cwd : '',
+      prompt: typeof request.body?.prompt === 'string' ? request.body.prompt : '',
+      model: typeof request.body?.model === 'string' ? request.body.model : '',
+      reasoningEffort: typeof request.body?.reasoningEffort === 'string'
+        ? request.body.reasoningEffort
+        : '',
+    }))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to start the remote session.'
+    response.status(/commandId|expiresAt/.test(message) ? 400 : remoteControlStatus(message)).json({ error: message })
+  }
+})
+
+app.post('/api/fleet/hosts/:id/remote-sessions/:sessionId/prompt', async (request, response) => {
+  try {
+    response.status(202).json(await fleetMonitor.promptRemoteSession(
+      request.params.id,
+      request.params.sessionId,
+      {
+        commandId: requiredCommandId(request.body?.commandId),
+        expiresAt: requiredCommandExpiry(request.body?.expiresAt),
+        prompt: typeof request.body?.prompt === 'string' ? request.body.prompt : '',
+      },
+    ))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to send the remote follow-up.'
+    response.status(/commandId|expiresAt/.test(message) ? 400 : remoteControlStatus(message)).json({ error: message })
+  }
+})
+
+app.post('/api/fleet/hosts/:id/remote-sessions/:sessionId/interrupt', async (request, response) => {
+  try {
+    response.status(202).json(await fleetMonitor.interruptRemoteSession(
+      request.params.id,
+      request.params.sessionId,
+      {
+        commandId: requiredCommandId(request.body?.commandId),
+        expiresAt: requiredCommandExpiry(request.body?.expiresAt),
+      },
+    ))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to interrupt the remote turn.'
+    response.status(/commandId|expiresAt/.test(message) ? 400 : remoteControlStatus(message)).json({ error: message })
+  }
+})
+
+app.post(
+  '/api/fleet/hosts/:id/remote-sessions/:sessionId/permissions/:permissionId',
+  async (request, response) => {
+    try {
+      response.status(202).json(await fleetMonitor.resolveRemotePermission(
+        request.params.id,
+        request.params.sessionId,
+        request.params.permissionId,
+        {
+          commandId: requiredCommandId(request.body?.commandId),
+          expiresAt: requiredCommandExpiry(request.body?.expiresAt),
+          optionId: typeof request.body?.optionId === 'string'
+            ? request.body.optionId
+            : undefined,
+        },
+      ))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to resolve remote permission.'
+      response.status(/commandId|expiresAt/.test(message) ? 400 : remoteControlStatus(message)).json({ error: message })
+    }
+  },
+)
 
 app.get('/api/fleet/hosts/:id/usage', async (request, response) => {
   const period = typeof request.query.period === 'string' ? request.query.period : '30d'
@@ -533,6 +695,41 @@ app.post('/api/sessions/:id/cancel', async (request, response) => {
   }
 })
 
+app.get('/api/sessions/:id/preview', async (request, response) => {
+  const session = await resolveSession(request.params.id)
+  if (!session) {
+    response.status(404).json({ error: 'Session not found' })
+    return
+  }
+  response.json(await previewSupervisor.inspect(session.id, session.cwd))
+})
+
+app.post('/api/sessions/:id/preview/start', async (request, response) => {
+  const session = await resolveSession(request.params.id)
+  if (!session) {
+    response.status(404).json({ error: 'Session not found' })
+    return
+  }
+  try {
+    response.status(202).json(await previewSupervisor.start(session.id, session.cwd))
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Unable to start preview.' })
+  }
+})
+
+app.post('/api/sessions/:id/preview/stop', async (request, response) => {
+  const session = await resolveSession(request.params.id)
+  if (!session) {
+    response.status(404).json({ error: 'Session not found' })
+    return
+  }
+  try {
+    response.json(await previewSupervisor.stop(session.id))
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Unable to stop preview.' })
+  }
+})
+
 app.get('/api/events', (request, response) => {
   response.setHeader('Content-Type', 'text/event-stream')
   response.setHeader('Cache-Control', 'no-cache')
@@ -611,6 +808,7 @@ async function shutdown() {
     fleetMonitor.stop(),
     controller.stop(),
     workspaceInspector.close(),
+    previewSupervisor.close(),
   ])
   process.exit(0)
 }
