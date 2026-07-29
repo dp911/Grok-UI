@@ -98,6 +98,38 @@ test.describe.serial('public launch path', () => {
     await expect(page.getByText(/PID \d+/).first()).toBeVisible()
   })
 
+  test('applies and persists the Minimal Calm theme with restrained decorative motion', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: /Themes/ }).click()
+
+    const calmTheme = page.getByRole('button', { name: /Minimal Calm/ })
+    await expect(calmTheme).toBeVisible()
+    await expect(calmTheme.getByText('03 / 03')).toBeVisible()
+    await calmTheme.click()
+
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'minimal-calm')
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f7f7f4')
+    expect(await page.evaluate(() => localStorage.getItem('grok-ui-theme'))).toBe('minimal-calm')
+    expect(await page.locator('html').evaluate((element) => getComputedStyle(element).colorScheme)).toBe('light')
+    expect(await page.locator('.scan-beam').evaluate((element) => getComputedStyle(element).display)).toBe('none')
+    expect(await page.locator('.status-dot.is-live').first().evaluate(
+      (element) => getComputedStyle(element).animationName,
+    )).toBe('none')
+
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'minimal-calm')
+    expect(await page.evaluate(() => localStorage.getItem('grok-ui-theme'))).toBe('minimal-calm')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
+    expect(await page.locator('.mobile-bottom-nav').evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    )).toBe('rgba(247, 247, 244, 0.96)')
+    expect(await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )).toBe(0)
+  })
+
   test('redacts sensitive runtime data and persists Privacy Mode', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByText('Confidential Launch').first()).toBeVisible()
