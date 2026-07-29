@@ -679,3 +679,21 @@ export interface FleetHostMutationResponse {
   host: FleetHostPublicConfig
   fleet: FleetSnapshot
 }
+
+export type PreviewStatus = 'idle' | 'starting' | 'running' | 'failed' | 'stopped'
+
+export interface PreviewSnapshot {
+  sessionId: string
+  cwd: string
+  available: boolean
+  status: PreviewStatus
+  command: string
+  args: string[]
+  displayCommand: string
+  port: number
+  url: string
+  startedAt: string
+  updatedAt: string
+  error: string
+  logs: string[]
+}

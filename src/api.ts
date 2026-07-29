@@ -7,6 +7,7 @@ import type {
   FleetHostMutationResponse,
   FleetHostView,
   FleetSnapshot,
+  PreviewSnapshot,
   SessionRow,
   SessionWorkbenchData,
   LiveSnapshot,
@@ -617,4 +618,25 @@ export async function resolveRemotePermission(
     { commandId, expiresAt, optionId },
     'Unable to resolve the remote permission',
   )
+}
+
+export async function getSessionPreview(sessionId: string): Promise<PreviewSnapshot> {
+  return json(
+    await boundedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview`, {
+      headers: { Accept: 'application/json' },
+    }),
+    'Preview request failed',
+  )
+}
+
+export async function startSessionPreview(sessionId: string): Promise<PreviewSnapshot> {
+  return json(await boundedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview/start`, {
+    method: 'POST',
+  }), 'Unable to start preview')
+}
+
+export async function stopSessionPreview(sessionId: string): Promise<PreviewSnapshot> {
+  return json(await boundedFetch(`/api/sessions/${encodeURIComponent(sessionId)}/preview/stop`, {
+    method: 'POST',
+  }), 'Unable to stop preview')
 }

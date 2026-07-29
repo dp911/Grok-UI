@@ -59,6 +59,23 @@ through `session/load` and `session/prompt`.
 
 Diff paths are resolved beneath the repository root. Reads are bounded, binary content is not rendered, and untracked files are represented without leaving the repository.
 
+## Preview plane
+
+`PreviewSupervisor` detects package scripts only inside the workspace
+associated with a known local session. The browser cannot provide an arbitrary
+working directory or command.
+
+Starting a preview chooses an ephemeral port, passes loopback host and port
+settings to the detected package script, and spawns the executable with
+argument separation and no shell. Grok, token, secret, password, credential,
+and API-key environment variables are excluded. Output is stripped of terminal
+control sequences and kept as a bounded in-memory tail. Preview processes are
+not restored after a restart and are stopped during graceful shutdown.
+
+The application iframe uses the preview's separate loopback origin and a
+sandbox. Grok UI credentials and authentication cookies are not forwarded to
+the child process.
+
 ## Network boundary
 
 The production server binds to the loopback interface by default. A non-loopback host requires `GROK_UI_TOKEN`.
@@ -238,6 +255,7 @@ a second `ARCHITECTURE.md`; update this map when ownership moves.
 | Fixed-path HTTP/Tailscale/SSH connectivity | `server/fleet-connectors.ts` |
 | Polling, compatibility, health, freshness, and aggregation | `server/fleet-monitor.ts` |
 | Central authenticated routes and local composition root | `server/index.ts` |
+| Local loopback preview lifecycle and bounded logs | `server/preview-supervisor.ts` |
 | Remote managed-session console | `src/views/RemoteSessionWorkbench.tsx` |
 | Durable local session/usage state | `server/session-state.ts`, `server/usage-ledger.ts` |
 

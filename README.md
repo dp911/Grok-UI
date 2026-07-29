@@ -58,7 +58,8 @@ provides them—never guessed or auto-approved.
 
 Open any recorded CLI session or managed lane in a clearly labeled Session
 Console to chat with the agent, review its activity, inspect changes, manage
-permissions, and send follow-ups. Managed sessions survive dashboard restarts.
+permissions, send follow-ups, and launch a session-scoped web preview. Managed
+sessions survive dashboard restarts.
 
 </td>
 <td width="50%" valign="top">
@@ -224,6 +225,19 @@ cancels pending permissions, preserves final tool updates, surfaces a retry when
 Grok does not confirm, and leaves the lane ready to resume. Rename and archive
 actions are local Grok UI overlays; Grok’s own session files are never rewritten.
 
+## Session previews
+
+The local Session Console detects `dev` or `start` scripts in the workspace
+already associated with that session and shows the exact command before
+anything runs. Starting a preview launches a separate process without a shell,
+binds supported frameworks to a random loopback port, and streams a bounded
+output tail into the console.
+
+The preview surface includes desktop, tablet, and mobile widths, reload and
+external-open controls, and an explicit Stop action. Preview processes are
+ephemeral and terminate when Grok UI shuts down. Privacy Mode hides the embedded
+application and redacts the displayed command and logs.
+
 ## Workflow runs
 
 The Runs view listens for Grok’s structured `workflow_updated` notifications on
@@ -327,10 +341,11 @@ for the product contract and staged decisions.
 
 ## Themes
 
-Two complete visual systems ship with the dashboard:
+Three complete visual systems ship with the dashboard:
 
 - **Operator** — carbon black, signal lime, and a precision HUD grid
 - **Event Horizon** — deep-space red, cold starlight, and glass command surfaces
+- **Minimal Calm** — quiet stone surfaces, sage signals, and restrained motion
 
 Theme selection stays in local browser storage and never changes session data.
 
@@ -339,6 +354,8 @@ Theme selection stays in local browser storage and never changes session data.
 - The server binds to the loopback interface by default.
 - Non-loopback binding requires `GROK_UI_TOKEN`.
 - Grok credentials never pass through the browser.
+- Local preview processes bind to loopback, receive no Grok credentials, and
+  start only after an explicit user action.
 - Persistent Privacy Mode replaces visible session names, paths, identifiers,
   event content, file names, remote host names, and endpoints with stable
   presentation-safe aliases.
@@ -419,6 +436,7 @@ server/
   grok-store.ts           historical metadata aggregation
   session-reader.ts       bounded conversation and tool timeline
   session-state.ts        durable managed lanes and local annotations
+  preview-supervisor.ts   loopback web preview lifecycle and bounded logs
   workspace-inspector.ts  live Git status and bounded diff inspection
   security.ts             local and remote access gate
 src/
@@ -429,11 +447,12 @@ src/
   views/fleet/            status, editor, selectors, and telemetry panels
   views/ChangesView.tsx   live repository change workbench
   views/SessionWorkbench.tsx
-                            session timeline and operations
+                            local session timeline, preview, and operations
   views/RemoteSessionWorkbench.tsx
                             live remote conversation and safe controls
   App.tsx                 dashboard shell and event-stream client
   styles/fleet.css        Fleet-only presentation
+  styles/minimal-calm.css isolated quiet-theme presentation layer
 ```
 
 The longer design and trust-boundary notes live in

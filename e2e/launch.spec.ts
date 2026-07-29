@@ -36,6 +36,18 @@ async function registerLiveSession() {
   const timestamp = new Date().toISOString()
   await fs.mkdir(sessionDirectory, { recursive: true })
   await Promise.all([
+    fs.writeFile(path.join(workspace, 'package.json'), JSON.stringify({
+      scripts: { dev: 'node preview-server.mjs' },
+    })),
+    fs.writeFile(path.join(workspace, 'preview-server.mjs'), `
+      import http from 'node:http'
+      const port = Number(process.env.PORT)
+      const host = process.env.HOST
+      http.createServer((_request, response) => {
+        response.setHeader('Content-Type', 'text/html')
+        response.end('<main><h1>Build preview online</h1><p>Session-scoped loopback app</p></main>')
+      }).listen(port, host, () => console.log('e2e preview ready on ' + host + ':' + port))
+    `),
     fs.writeFile(path.join(sessionDirectory, 'summary.json'), JSON.stringify({
       info: { id: sessionId, cwd: workspace },
       generated_title: 'Confidential Launch',
@@ -107,6 +119,38 @@ test.describe.serial('public launch path', () => {
 
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'event-horizon')
     expect(await page.evaluate(() => localStorage.getItem('grok-ui-theme'))).toBe('event-horizon')
+  })
+
+  test('applies and persists the Minimal Calm theme with restrained decorative motion', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: /Themes/ }).click()
+
+    const calmTheme = page.getByRole('button', { name: /Minimal Calm/ })
+    await expect(calmTheme).toBeVisible()
+    await expect(calmTheme.getByText('03 / 03')).toBeVisible()
+    await calmTheme.click()
+
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'minimal-calm')
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#f7f7f4')
+    expect(await page.evaluate(() => localStorage.getItem('grok-ui-theme'))).toBe('minimal-calm')
+    expect(await page.locator('html').evaluate((element) => getComputedStyle(element).colorScheme)).toBe('light')
+    expect(await page.locator('.scan-beam').evaluate((element) => getComputedStyle(element).display)).toBe('none')
+    expect(await page.locator('.status-dot.is-live').first().evaluate(
+      (element) => getComputedStyle(element).animationName,
+    )).toBe('none')
+
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'minimal-calm')
+    expect(await page.evaluate(() => localStorage.getItem('grok-ui-theme'))).toBe('minimal-calm')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeVisible()
+    expect(await page.locator('.mobile-bottom-nav').evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    )).toBe('rgba(247, 247, 244, 0.96)')
+    expect(await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )).toBe(0)
   })
 
   test('guides a clean installation through missing CLI and ready states', async ({ page }) => {
@@ -217,6 +261,29 @@ test.describe.serial('public launch path', () => {
     expect(await page.locator('body').innerText()).not.toContain('secret-client')
   })
 
+  test('launches and controls a responsive session preview', async ({ page }) => {
+    await page.goto('/')
+    await registerLiveSession()
+    await expect(page.getByText('Confidential Launch').first()).toBeVisible({ timeout: 10_000 })
+    await page.getByRole('button', { name: 'Open Session' }).click()
+    await page.getByRole('button', { name: /Preview/ }).click()
+
+    await expect(page.getByText(/npm run dev/)).toBeVisible()
+    await page.locator('.preview-toolbar').getByRole('button', { name: 'Start preview' }).click()
+    await expect(page.getByText('LOOPBACK PREVIEW')).toBeVisible({ timeout: 10_000 })
+    await expect(page.frameLocator('iframe[title="Session application preview"]').getByRole('heading', {
+      name: 'Build preview online',
+    })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Mobile preview' }).click()
+    await expect(page.locator('.preview-viewport')).toHaveClass(/viewport-mobile/)
+    await page.getByRole('button', { name: 'Reload preview' }).click()
+
+    await page.locator('.preview-toolbar').getByRole('button', { name: 'Stop' }).click()
+    await expect(page.getByText('Preview process stopped.')).toBeVisible()
+    await expect(page.getByText('Preview is offline')).toBeVisible()
+  })
+
   test('launches and approves a managed ACP control session', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: /Control/ }).click()
@@ -230,7 +297,7 @@ test.describe.serial('public launch path', () => {
     await expect(page.getByText('Write the verified fixture')).toBeVisible()
     await page.getByRole('button', { name: 'Allow once' }).click()
     await expect(page.getByText('Permission approved and command completed.')).toBeVisible()
-    await expect(page.getByText('20')).toBeVisible()
+    await expect(page.getByText('20', { exact: true })).toBeVisible()
   })
 
   test('recovers the ACP control channel after its child process exits', async ({ page }) => {

@@ -20,6 +20,9 @@ Include the affected version, deployment topology, reproduction steps, and impac
 - Treat authenticated access as equivalent to local developer access: the UI can display conversations and source diffs and can instruct Grok to use tools.
 - Run Grok UI as the same unprivileged user who owns the intended `~/.grok` directory.
 - Do not expose port `4310` directly to the public internet.
+- Treat generated preview applications as untrusted local development code.
+  Inspect the displayed package command before starting it, and stop previews
+  when they are no longer needed.
 
 ## Multi-machine monitoring
 
@@ -101,6 +104,20 @@ The host stores bounded command and audit evidence in
 contain command metadata, token fingerprints, timestamps, and outcomes—not
 prompts, transcripts, credentials, or raw provider error messages. Do not
 include this file in routine support bundles.
+
+## Session previews
+
+Preview applications run as separate loopback processes and origins. They do
+not receive Grok credentials, host-agent credentials, or the Grok UI access
+token, but they still run with the operating-system permissions of the current
+user. Grok UI detects commands only inside the workspace of a known local
+session, uses argument-separated process spawning without a shell, strips
+sensitive Grok and credential environment variables, and retains only a
+bounded log tail.
+
+The embedded iframe is sandboxed and allowed only from loopback origins by the
+Content Security Policy. That iframe sandbox is a browser boundary, not an
+operating-system sandbox.
 
 ## Trust boundary
 

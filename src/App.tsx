@@ -98,9 +98,14 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'themes', index: '12', label: 'Themes', eyebrow: 'Appearance', icon: Palette, shortcut: '0' },
 ]
 
-type ThemeId = 'operator' | 'event-horizon'
+type ThemeId = 'operator' | 'event-horizon' | 'minimal-calm'
 
 const DEFAULT_THEME: ThemeId = 'event-horizon'
+const THEME_COLORS: Record<ThemeId, string> = {
+  operator: '#090a08',
+  'event-horizon': '#03050a',
+  'minimal-calm': '#f7f7f4',
+}
 
 const THEMES: Array<{
   id: ThemeId
@@ -120,12 +125,18 @@ const THEMES: Array<{
     eyebrow: 'Deep-space system',
     description: 'A cinematic red singularity, cold starlight, and glassy command surfaces.',
   },
+  {
+    id: 'minimal-calm',
+    name: 'Minimal Calm',
+    eyebrow: 'Quiet control room',
+    description: 'Stone surfaces, sage signals, and restrained motion for focused sessions.',
+  },
 ]
 
 function storedTheme(): ThemeId {
   try {
     const stored = localStorage.getItem('grok-ui-theme')
-    return stored === 'operator' || stored === 'event-horizon' ? stored : DEFAULT_THEME
+    return THEMES.some((theme) => theme.id === stored) ? stored as ThemeId : DEFAULT_THEME
   } catch {
     return DEFAULT_THEME
   }
@@ -199,6 +210,9 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', THEME_COLORS[theme])
     try {
       localStorage.setItem('grok-ui-theme', theme)
     } catch {
@@ -577,7 +591,9 @@ function ThemesView({
                 </span>
               </span>
               <span className="theme-card-copy">
-                <span className="theme-card-index">0{index + 1} / 02</span>
+                <span className="theme-card-index">
+                  {String(index + 1).padStart(2, '0')} / {String(THEMES.length).padStart(2, '0')}
+                </span>
                 <span className="theme-card-eyebrow">{theme.eyebrow}</span>
                 <strong>{theme.name}</strong>
                 <small>{theme.description}</small>
@@ -1624,7 +1640,7 @@ function LibraryView({
               <div className="library-intro"><Icon size={20} /><p>{group.copy}</p></div>
               <div className="capability-list">
                 {items.length ? items.map((item) => (
-                  <div key={`${item.kind}:${item.name}`}>
+                  <div key={`${item.kind}:${item.source}:${item.name}`}>
                     <span className="capability-icon">{item.kind === 'skill' ? 'S' : item.kind === 'agent' ? 'A' : 'P'}</span>
                     <strong>{privacy.capability(item.name, group.label.slice(0, -1))}</strong>
                     <span className={`source-tag source-${item.source}`}>{item.source}</span>

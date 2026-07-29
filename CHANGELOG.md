@@ -20,6 +20,11 @@
 - Added server, connector, registry, monitor, protocol, browser-parser, and
   production end-to-end coverage for authentication, capability, freshness,
   duplicate delivery, live chat, permissions, and interruption.
+- Added session-scoped web app previews to the local Session Console, including
+  framework-aware command detection, explicit start and stop controls, bounded
+  process logs, and desktop, tablet, and mobile preview widths.
+- Added the Minimal Calm theme with a neutral light palette and restrained
+  decorative motion across the complete Runs, Usage, Fleet, and session UI.
 
 ## 0.10.0 — 2026-07-28
 

@@ -30,6 +30,7 @@ import { usageExport, type UsageExportFormat } from './usage-export.js'
 import { FleetRegistryStore, publicHostConfig } from './fleet-registry.js'
 import { FleetMonitor } from './fleet-monitor.js'
 import { controlSessionRow, liveAgentRow } from './session-projection.js'
+import { PreviewSupervisor } from './preview-supervisor.js'
 
 const app = express()
 const sessionState = new SessionStateStore()
@@ -42,6 +43,7 @@ const controller = new GrokController(sessionState)
 await controller.restore()
 const workspaceInspector = new WorkspaceInspector()
 const sessionReader = new SessionReader(store.grokHome)
+const previewSupervisor = new PreviewSupervisor()
 const usageLedger = new UsageLedger(sessionState)
 const usageBudgets = new UsageBudgetManager(sessionState, usageLedger)
 const runtimeInspector = new RuntimeInspector()
@@ -693,6 +695,41 @@ app.post('/api/sessions/:id/cancel', async (request, response) => {
   }
 })
 
+app.get('/api/sessions/:id/preview', async (request, response) => {
+  const session = await resolveSession(request.params.id)
+  if (!session) {
+    response.status(404).json({ error: 'Session not found' })
+    return
+  }
+  response.json(await previewSupervisor.inspect(session.id, session.cwd))
+})
+
+app.post('/api/sessions/:id/preview/start', async (request, response) => {
+  const session = await resolveSession(request.params.id)
+  if (!session) {
+    response.status(404).json({ error: 'Session not found' })
+    return
+  }
+  try {
+    response.status(202).json(await previewSupervisor.start(session.id, session.cwd))
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Unable to start preview.' })
+  }
+})
+
+app.post('/api/sessions/:id/preview/stop', async (request, response) => {
+  const session = await resolveSession(request.params.id)
+  if (!session) {
+    response.status(404).json({ error: 'Session not found' })
+    return
+  }
+  try {
+    response.json(await previewSupervisor.stop(session.id))
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Unable to stop preview.' })
+  }
+})
+
 app.get('/api/events', (request, response) => {
   response.setHeader('Content-Type', 'text/event-stream')
   response.setHeader('Cache-Control', 'no-cache')
@@ -771,6 +808,7 @@ async function shutdown() {
     fleetMonitor.stop(),
     controller.stop(),
     workspaceInspector.close(),
+    previewSupervisor.close(),
   ])
   process.exit(0)
 }
