@@ -46,7 +46,8 @@ jobs:
       - run: npm run build
       - run: npm run test:package
 
-  browser-e2e:
+  browser-e2e-matrix:
+    name: browser-e2e (${{ matrix.browser }})
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -70,3 +71,10 @@ jobs:
           name: playwright-report-${{ matrix.browser }}
           path: playwright-report/
           retention-days: 7
+
+  browser-e2e:
+    name: browser-e2e
+    needs: browser-e2e-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Chromium and WebKit end-to-end suites passed."
