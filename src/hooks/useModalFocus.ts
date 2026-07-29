@@ -21,6 +21,8 @@ export function useModalFocus<T extends HTMLElement>(
   onClose: () => void,
   initialFocusSelector?: string,
   returnFocus?: HTMLElement | null,
+  active = true,
+  restoreFocus = true,
 ): RefObject<T | null> {
   const containerRef = useRef<T>(null)
   const closeRef = useRef(onClose)
@@ -30,6 +32,7 @@ export function useModalFocus<T extends HTMLElement>(
   }, [onClose])
 
   useEffect(() => {
+    if (!active) return
     const previous = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
@@ -75,6 +78,7 @@ export function useModalFocus<T extends HTMLElement>(
     return () => {
       cancelAnimationFrame(frame)
       document.removeEventListener('keydown', onKeyDown, true)
+      if (!restoreFocus) return
       if (returnFocus?.isConnected) {
         returnFocus.focus()
       } else if (previous?.isConnected && previous !== document.body) {
@@ -83,7 +87,7 @@ export function useModalFocus<T extends HTMLElement>(
         document.querySelector<HTMLElement>('.main-stage')?.focus()
       }
     }
-  }, [initialFocusSelector, returnFocus])
+  }, [active, initialFocusSelector, restoreFocus, returnFocus])
 
   return containerRef
 }

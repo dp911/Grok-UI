@@ -71,6 +71,7 @@ import { WorkflowsView } from './views/WorkflowsView'
 import { UsageView } from './views/UsageView'
 import { RuntimeIntelligencePanels } from './views/RuntimeIntelligencePanels'
 import { FleetView } from './views/FleetView'
+import { useModalFocus } from './hooks/useModalFocus'
 import { PrivacyProvider, usePrivacy } from './privacy'
 import packageJson from '../package.json'
 
@@ -372,14 +373,6 @@ function App() {
       if (trigger?.isConnected) trigger.focus()
     })
   }, [])
-
-  useEffect(() => {
-    if (!mobileNavOpen) return
-    const frame = requestAnimationFrame(() => {
-      document.querySelector<HTMLButtonElement>('.sidebar-close')?.focus()
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [mobileNavOpen])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -706,6 +699,14 @@ function Sidebar({
   onNavigate: (id: ViewId) => void
   onClose: () => void
 }) {
+  const dialogRef = useModalFocus<HTMLElement>(
+    onClose,
+    '.sidebar-close',
+    undefined,
+    open,
+    false,
+  )
+
   return (
     <>
       <button
@@ -713,7 +714,14 @@ function Sidebar({
         aria-label="Close navigation"
         onClick={onClose}
       />
-      <aside className={`sidebar ${open ? 'is-open' : ''}`}>
+      <aside
+        ref={dialogRef}
+        className={`sidebar ${open ? 'is-open' : ''}`}
+        role={open ? 'dialog' : undefined}
+        aria-modal={open ? 'true' : undefined}
+        aria-label={open ? 'Navigation menu' : undefined}
+        tabIndex={open ? -1 : undefined}
+      >
         <div className="brand-lockup">
           <BrandLogo />
           <div>
