@@ -1541,7 +1541,7 @@ function LibraryView({
               <div className="library-intro"><Icon size={20} /><p>{group.copy}</p></div>
               <div className="capability-list">
                 {items.length ? items.map((item) => (
-                  <div key={`${item.kind}:${item.name}`}>
+                  <div key={`${item.kind}:${item.source}:${item.name}`}>
                     <span className="capability-icon">{item.kind === 'skill' ? 'S' : item.kind === 'agent' ? 'A' : 'P'}</span>
                     <strong>{privacy.capability(item.name, group.label.slice(0, -1))}</strong>
                     <span className={`source-tag source-${item.source}`}>{item.source}</span>
