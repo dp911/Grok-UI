@@ -12,7 +12,8 @@ const FOCUSABLE_SELECTOR = [
 function visibleFocusable(container: HTMLElement) {
   return [...container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)]
     .filter((element) =>
-      element.getClientRects().length > 0
+      element.tabIndex >= 0
+      && element.getClientRects().length > 0
       && element.getAttribute('aria-hidden') !== 'true')
 }
 

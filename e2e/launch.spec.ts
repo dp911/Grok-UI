@@ -277,6 +277,9 @@ test.describe.serial('public launch path', () => {
     await expect(closeButton).toBeFocused()
     await page.keyboard.press('Shift+Tab')
     expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true)
+    expect(await dialog.evaluate(
+      () => document.activeElement?.classList.contains('workbench-scrim'),
+    )).toBe(false)
     await page.keyboard.press('Tab')
     await expect(closeButton).toBeFocused()
     await page.keyboard.press('Escape')
