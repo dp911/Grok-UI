@@ -31,7 +31,7 @@
 - Hardened the release candidate against duplicate cross-process delivery,
   lost acknowledgements, host restarts, expired and malformed command IDs,
   stale permission state, cross-host receipt substitution, traversal payloads,
-  oversized requests, and reconnect races.
+  oversized requests, and out-of-order refresh/stream races.
 
 ## 0.10.0 — 2026-07-28
 

@@ -187,7 +187,19 @@ test.describe.serial('public launch path', () => {
   })
 
   test('guides a clean installation through missing CLI and ready states', async ({ page }) => {
-    await fs.rm(path.join(grokHome, 'e2e-cli-ready'), { force: true })
+    await Promise.all([
+      fs.rm(path.join(grokHome, 'e2e-cli-ready'), { force: true }),
+      fs.rm(path.join(grokHome, 'active_sessions.json'), { force: true }),
+      fs.rm(path.join(grokHome, 'sessions'), { recursive: true, force: true }),
+    ])
+    await expect.poll(async () => {
+      const dashboard = await (await page.request.get('/api/dashboard?refresh=1')).json()
+      const live = await (await page.request.get('/api/live')).json()
+      return {
+        sessions: dashboard.stats.sessions,
+        active: live.activeCount,
+      }
+    }, { timeout: 10_000 }).toEqual({ sessions: 0, active: 0 })
     const reset = await page.request.get('/api/setup?refresh=1')
     expect(reset.ok()).toBe(true)
     const resetStatus = await reset.json()
