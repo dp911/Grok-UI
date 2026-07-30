@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — v0.11 secure remote sessions
+## 0.11.0 — 2026-07-30
 
 - Added an explicitly enabled Remote Session Console that lets a user start a
   managed Grok session on a trusted host, receive live structured updates, send
@@ -25,6 +25,13 @@
   process logs, and desktop, tablet, and mobile preview widths.
 - Added the Minimal Calm theme with a neutral light palette and restrained
   decorative motion across the complete Runs, Usage, Fleet, and session UI.
+- Optimized the complete remote-control journey for phones, including the
+  navigation rail, host setup, session controls, permission dialogs, safe-area
+  spacing, focus restoration, and keyboard-only dialog containment.
+- Hardened the release candidate against duplicate cross-process delivery,
+  lost acknowledgements, host restarts, expired and malformed command IDs,
+  stale permission state, cross-host receipt substitution, traversal payloads,
+  oversized requests, and reconnect races.
 
 ## 0.10.0 — 2026-07-28
 
