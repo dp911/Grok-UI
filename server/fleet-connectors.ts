@@ -87,12 +87,35 @@ export function sshTunnelArgs(host: FleetHostConfig, timeoutMs: number): string[
   ]
 }
 
+const PROTOCOL_RESOURCE_ID = /^[A-Za-z0-9._:-]{1,160}$/
+
+function decodedResourceId(value: string): string {
+  const decoded = decodeURIComponent(value)
+  if (!PROTOCOL_RESOURCE_ID.test(decoded)) {
+    throw new Error('Fleet connector resource ID is invalid.')
+  }
+  return decoded
+}
+
 function fixedAgentPath(value: string): string {
   if (!value.startsWith('/agent/v1/')) throw new Error('Fleet connector accepts only fixed agent protocol paths.')
   const parsed = new URL(value, 'http://agent.invalid')
-  if (parsed.origin !== 'http://agent.invalid' || !parsed.pathname.startsWith('/agent/v1/')) {
+  if (
+    parsed.origin !== 'http://agent.invalid'
+    || parsed.hash
+    || !parsed.pathname.startsWith('/agent/v1/')
+  ) {
     throw new Error('Fleet connector path is invalid.')
   }
+  const route = parsed.pathname.slice('/agent/v1/'.length)
+  const segments = route.split('/')
+  const fixedRoute = (
+    (segments.length === 1 && ['hello', 'snapshot'].includes(segments[0]) && !parsed.search)
+    || (segments.length === 2 && segments[0] === 'sessions' && !parsed.search
+      && Boolean(decodedResourceId(segments[1])))
+    || (segments.length === 1 && segments[0] === 'usage')
+  )
+  if (!fixedRoute) throw new Error('Fleet connector path is not allowlisted.')
   return `${parsed.pathname}${parsed.search}`
 }
 
@@ -109,17 +132,27 @@ function fixedControlPath(value: string, method: 'GET' | 'POST'): string {
   ) {
     throw new Error('Remote-session connector path is invalid.')
   }
-  const route = parsed.pathname.slice('/agent/control/v1'.length)
-  const opaqueId = '[^/]+'
+  const segments = parsed.pathname.slice('/agent/control/v1/'.length).split('/')
+  const validId = (index: number) => Boolean(decodedResourceId(segments[index]))
   const allowed = method === 'GET'
-    ? [new RegExp(`^/sessions/${opaqueId}$`)]
-    : [
-        /^\/sessions$/,
-        new RegExp(`^/sessions/${opaqueId}/prompt$`),
-        new RegExp(`^/sessions/${opaqueId}/interrupt$`),
-        new RegExp(`^/sessions/${opaqueId}/permissions/${opaqueId}$`),
-      ]
-  if (!allowed.some((pattern) => pattern.test(route))) {
+    ? segments.length === 2 && segments[0] === 'sessions' && validId(1)
+    : (
+        (segments.length === 1 && segments[0] === 'sessions')
+        || (
+          segments.length === 3
+          && segments[0] === 'sessions'
+          && validId(1)
+          && ['prompt', 'interrupt'].includes(segments[2])
+        )
+        || (
+          segments.length === 4
+          && segments[0] === 'sessions'
+          && validId(1)
+          && segments[2] === 'permissions'
+          && validId(3)
+        )
+      )
+  if (!allowed) {
     throw new Error('Remote-session connector path is not allowlisted.')
   }
   return parsed.pathname

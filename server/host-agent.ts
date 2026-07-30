@@ -538,6 +538,13 @@ function commandId(value: unknown): string {
   return value
 }
 
+function resourceId(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !SESSION_ID.test(value)) {
+    throw new Error(`A valid ${label} is required.`)
+  }
+  return value
+}
+
 function commandExpiresAt(value: unknown): string {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
     throw new Error('A valid expiresAt is required.')
@@ -644,7 +651,8 @@ export function createHostAgentApp(
   })
   app.get('/agent/v1/sessions/:id', async (request, response, next) => {
     try {
-      const session = await provider.session(request.params.id)
+      const id = resourceId(request.params.id, 'session ID')
+      const session = await provider.session(id)
       if (!session) {
         response.status(404).json({ error: 'Remote session was not found.' })
         return
@@ -681,7 +689,8 @@ export function createHostAgentApp(
   app.get('/agent/control/v1/sessions/:id', async (request, response, next) => {
     try {
       if (!provider.remoteSession) throw new Error('Remote sessions are unavailable.')
-      const session = await provider.remoteSession(request.params.id)
+      const id = resourceId(request.params.id, 'session ID')
+      const session = await provider.remoteSession(id)
       if (!session) {
         response.status(404).json({ error: 'Remote session was not found.' })
         return
@@ -720,21 +729,22 @@ export function createHostAgentApp(
   app.post('/agent/control/v1/sessions/:id/prompt', async (request, response, next) => {
     try {
       if (!provider.promptRemoteSession || !commandStore) throw new Error('Remote follow-up is unavailable.')
+      const sessionId = resourceId(request.params.id, 'session ID')
       const id = commandId(request.body?.commandId)
       const expiresAt = commandExpiresAt(request.body?.expiresAt)
       const prompt = typeof request.body?.prompt === 'string' ? request.body.prompt : ''
       const result = await commandStore.execute({
         commandId: id,
         kind: 'session.prompt',
-        target: request.params.id,
+        target: sessionId,
         actorFingerprint,
         expiresAt,
-        payload: { sessionId: request.params.id, prompt },
+        payload: { sessionId, prompt },
       }, async () => {
-        await provider.promptRemoteSession!(request.params.id, prompt)
-        return { sessionId: request.params.id }
+        await provider.promptRemoteSession!(sessionId, prompt)
+        return { sessionId }
       })
-      response.status(202).json(commandReceipt(id, 'session.prompt', request.params.id, result))
+      response.status(202).json(commandReceipt(id, 'session.prompt', sessionId, result))
     } catch (error) {
       next(error)
     }
@@ -742,20 +752,21 @@ export function createHostAgentApp(
   app.post('/agent/control/v1/sessions/:id/interrupt', async (request, response, next) => {
     try {
       if (!provider.interruptRemoteSession || !commandStore) throw new Error('Remote interrupt is unavailable.')
+      const sessionId = resourceId(request.params.id, 'session ID')
       const id = commandId(request.body?.commandId)
       const expiresAt = commandExpiresAt(request.body?.expiresAt)
       const result = await commandStore.execute({
         commandId: id,
         kind: 'session.interrupt',
-        target: request.params.id,
+        target: sessionId,
         actorFingerprint,
         expiresAt,
-        payload: { sessionId: request.params.id },
+        payload: { sessionId },
       }, async () => {
-        await provider.interruptRemoteSession!(request.params.id)
-        return { sessionId: request.params.id }
+        await provider.interruptRemoteSession!(sessionId)
+        return { sessionId }
       })
-      response.status(202).json(commandReceipt(id, 'session.interrupt', request.params.id, result))
+      response.status(202).json(commandReceipt(id, 'session.interrupt', sessionId, result))
     } catch (error) {
       next(error)
     }
@@ -767,6 +778,9 @@ export function createHostAgentApp(
         if (!provider.resolveRemotePermission || !commandStore) {
           throw new Error('Remote permission decisions are unavailable.')
         }
+        if (!provider.remoteSession) throw new Error('Remote sessions are unavailable.')
+        const sessionId = resourceId(request.params.id, 'session ID')
+        const permissionId = resourceId(request.params.permissionId, 'permission ID')
         const id = commandId(request.body?.commandId)
         const expiresAt = commandExpiresAt(request.body?.expiresAt)
         const optionId = typeof request.body?.optionId === 'string'
@@ -775,26 +789,35 @@ export function createHostAgentApp(
         const result = await commandStore.execute({
           commandId: id,
           kind: 'permission.resolve',
-          target: request.params.id,
+          target: sessionId,
           actorFingerprint,
           expiresAt,
           payload: {
-            sessionId: request.params.id,
-            permissionId: request.params.permissionId,
+            sessionId,
+            permissionId,
             optionId: optionId || '',
           },
         }, async () => {
+          const current = await provider.remoteSession!(sessionId)
+          const permission = current?.permissions.find((candidate) =>
+            candidate.id === permissionId && candidate.sessionId === sessionId)
+          if (!permission) {
+            throw new Error('Remote permission request is no longer pending.')
+          }
+          if (optionId && !permission.options.some((option) => option.id === optionId)) {
+            throw new Error('Remote permission option was not offered by Grok.')
+          }
           await provider.resolveRemotePermission!(
-            request.params.id,
-            request.params.permissionId,
+            sessionId,
+            permissionId,
             optionId,
           )
-          return { sessionId: request.params.id }
+          return { sessionId }
         })
         response.status(202).json(commandReceipt(
           id,
           'permission.resolve',
-          request.params.id,
+          sessionId,
           result,
         ))
       } catch (error) {

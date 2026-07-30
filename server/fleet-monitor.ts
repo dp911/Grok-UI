@@ -29,6 +29,7 @@ import type {
   FleetHostView,
   FleetSnapshot,
   RemoteCommandReceipt,
+  RemoteCommandKind,
   RemoteSessionSnapshot,
   UsageGroupDimension,
   UsagePeriod,
@@ -414,7 +415,13 @@ export class FleetMonitor extends EventEmitter {
     reasoningEffort?: string
   }): Promise<RemoteCommandReceipt> {
     const state = this.controlState(hostId, 'remote.sessions.create')
-    return this.remoteCommand(state, '/agent/control/v1/sessions', input, hostId)
+    return this.remoteCommand(
+      state,
+      '/agent/control/v1/sessions',
+      input,
+      hostId,
+      'session.create',
+    )
   }
 
   async promptRemoteSession(
@@ -429,6 +436,8 @@ export class FleetMonitor extends EventEmitter {
       `/agent/control/v1/sessions/${encodeURIComponent(localId)}/prompt`,
       input,
       hostId,
+      'session.prompt',
+      localId,
     )
   }
 
@@ -444,6 +453,8 @@ export class FleetMonitor extends EventEmitter {
       `/agent/control/v1/sessions/${encodeURIComponent(localId)}/interrupt`,
       input,
       hostId,
+      'session.interrupt',
+      localId,
     )
   }
 
@@ -461,6 +472,8 @@ export class FleetMonitor extends EventEmitter {
       `/agent/control/v1/sessions/${encodeURIComponent(localSessionId)}/permissions/${encodeURIComponent(localPermissionId)}`,
       input,
       hostId,
+      'permission.resolve',
+      localSessionId,
     )
   }
 
@@ -534,6 +547,8 @@ export class FleetMonitor extends EventEmitter {
     fixedPath: string,
     body: unknown,
     hostId: string,
+    expectedKind: RemoteCommandKind,
+    expectedSessionId = '',
   ): Promise<RemoteCommandReceipt> {
     const connector = this.connector.postControlJson
     if (!connector) throw new Error('Remote-session transport is unavailable.')
@@ -544,6 +559,21 @@ export class FleetMonitor extends EventEmitter {
       body,
     ))
     const receipt = normalizeRemoteCommandReceipt(value)
+    const commandId = body && typeof body === 'object'
+      && typeof (body as { commandId?: unknown }).commandId === 'string'
+      ? (body as { commandId: string }).commandId
+      : ''
+    if (
+      receipt.commandId !== commandId
+      || receipt.kind !== expectedKind
+      || (
+        expectedKind === 'session.create'
+          ? !receipt.sessionId
+          : receipt.sessionId !== expectedSessionId
+      )
+    ) {
+      throw new Error('Remote host returned a command receipt for a different request.')
+    }
     return {
       ...receipt,
       sessionId: receipt.sessionId ? `${hostId}:${receipt.sessionId}` : '',

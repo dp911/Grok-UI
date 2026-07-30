@@ -6,6 +6,9 @@ export const REMOTE_COMMAND_STORE_VERSION = 1
 export const MAX_REMOTE_COMMAND_RECORDS = 1_000
 export const MAX_REMOTE_COMMAND_AUDIT_RECORDS = 1_000
 export const MAX_REMOTE_COMMAND_TTL_MS = 15 * 60 * 1_000
+const REMOTE_COMMAND_LOCK_WAIT_MS = 30_000
+const REMOTE_COMMAND_LOCK_RETRY_MS = 20
+const REMOTE_COMMAND_ORPHAN_GRACE_MS = 1_000
 
 export type RemoteCommandOutcome = 'accepted' | 'executing' | 'completed' | 'failed' | 'unknown'
 
@@ -86,6 +89,24 @@ function trimState(state: PersistedState): void {
   state.audit = state.audit.slice(-MAX_REMOTE_COMMAND_AUDIT_RECORDS)
 }
 
+function errorCode(error: unknown): string {
+  return isPlainObject(error) && typeof error.code === 'string' ? error.code : ''
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return errorCode(error) === 'EPERM'
+  }
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
 export class RemoteCommandStore {
   private state: PersistedState | undefined
   private loadPromise: Promise<PersistedState> | undefined
@@ -95,6 +116,7 @@ export class RemoteCommandStore {
   constructor(private readonly stateDirectory: string) {}
 
   private get stateFile(): string { return path.join(this.stateDirectory, 'remote-commands.json') }
+  private get lockFile(): string { return path.join(this.stateDirectory, '.remote-commands.lock') }
 
   private load(): Promise<PersistedState> {
     if (this.state) return Promise.resolve(this.state)
@@ -125,11 +147,79 @@ export class RemoteCommandStore {
       changed ||= commandCount !== this.state.commands.length || auditCount !== this.state.audit.length
       if (changed) await this.persist()
     } catch (error: unknown) {
-      const code = isPlainObject(error) && typeof error.code === 'string' ? error.code : ''
-      if (code !== 'ENOENT') throw error
+      if (errorCode(error) !== 'ENOENT') throw error
       this.state = emptyState()
     }
     return this.state
+  }
+
+  private async acquireLock(): Promise<() => Promise<void>> {
+    await fs.mkdir(this.stateDirectory, { recursive: true, mode: 0o700 })
+    await fs.chmod(this.stateDirectory, 0o700)
+    const token = randomUUID()
+    const deadline = Date.now() + REMOTE_COMMAND_LOCK_WAIT_MS
+    while (true) {
+      try {
+        const handle = await fs.open(this.lockFile, 'wx', 0o600)
+        try {
+          await handle.writeFile(JSON.stringify({
+            token,
+            pid: process.pid,
+            createdAt: new Date().toISOString(),
+          }))
+          await handle.sync()
+        } finally {
+          await handle.close()
+        }
+        return async () => {
+          try {
+            const owner = JSON.parse(await fs.readFile(this.lockFile, 'utf8')) as {
+              token?: unknown
+            }
+            if (owner.token === token) await fs.unlink(this.lockFile)
+          } catch (error) {
+            if (errorCode(error) !== 'ENOENT') throw error
+          }
+        }
+      } catch (error) {
+        if (errorCode(error) !== 'EEXIST') throw error
+      }
+
+      let removeOrphan = false
+      try {
+        const [raw, stat] = await Promise.all([
+          fs.readFile(this.lockFile, 'utf8'),
+          fs.stat(this.lockFile),
+        ])
+        const owner = JSON.parse(raw) as { pid?: unknown }
+        const pid = typeof owner.pid === 'number' ? owner.pid : 0
+        removeOrphan = pid > 0
+          ? !processIsAlive(pid)
+          : Date.now() - stat.mtimeMs >= REMOTE_COMMAND_ORPHAN_GRACE_MS
+      } catch (error) {
+        if (errorCode(error) === 'ENOENT') continue
+        try {
+          const stat = await fs.stat(this.lockFile)
+          removeOrphan = Date.now() - stat.mtimeMs >= REMOTE_COMMAND_ORPHAN_GRACE_MS
+        } catch (statError) {
+          if (errorCode(statError) === 'ENOENT') continue
+          throw statError
+        }
+      }
+      if (removeOrphan) {
+        try {
+          await fs.unlink(this.lockFile)
+          continue
+        } catch (error) {
+          if (errorCode(error) === 'ENOENT') continue
+          throw error
+        }
+      }
+      if (Date.now() >= deadline) {
+        throw new Error('Remote command store is busy; retry without changing the command ID.')
+      }
+      await delay(REMOTE_COMMAND_LOCK_RETRY_MS)
+    }
   }
 
   private audit(command: RemoteCommandRecord, outcome: RemoteCommandOutcome): void {
@@ -154,6 +244,22 @@ export class RemoteCommandStore {
   }
 
   async execute(request: RemoteCommandRequest, operation: () => Promise<unknown>): Promise<RemoteCommandResult> {
+    const release = await this.acquireLock()
+    try {
+      // Another process may have completed a command since this instance last
+      // loaded the store. Always reconcile from the durable file under the lock.
+      this.state = undefined
+      this.loadPromise = undefined
+      return await this.executeLocked(request, operation)
+    } finally {
+      await release()
+    }
+  }
+
+  private async executeLocked(
+    request: RemoteCommandRequest,
+    operation: () => Promise<unknown>,
+  ): Promise<RemoteCommandResult> {
     if (!COMMAND_ID.test(request.commandId)) throw new Error('Invalid commandId')
     const state = await this.load()
     const fingerprint = payloadFingerprint(request.payload)
