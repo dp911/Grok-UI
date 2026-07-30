@@ -47,6 +47,12 @@ read-only. A passing build or unit suite alone is not release evidence.
 v0.10 passed these gates and received explicit approval before its tag,
 npm publication, and GitHub release were created.
 
+For v0.11, the release gate must additionally prove that remote commands are
+authenticated, capability- and freshness-gated, idempotent across concurrent
+processes, honest after lost acknowledgements and restarts, and constrained to
+the documented control routes. The browser matrix must cover the complete
+remote session journey and mobile failure behavior in Chromium and WebKit.
+
 To publish an existing GitHub tag that predates npm publication, open the
 Release workflow in GitHub Actions, choose **Run workflow**, and enter the
 existing `vX.Y.Z` tag. The manual path publishes npm only and does not recreate

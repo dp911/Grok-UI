@@ -19,8 +19,9 @@ Keep the server loopback-only during development. Tests must not depend on real 
 - Keep changes focused and explain the user-facing impact.
 - Add tests for parsing, permissions, path validation, and security boundaries.
 - For fleet changes, test protocol compatibility, authentication failures,
-  bounded timeouts, disconnect and reconnect, freshness transitions, and the
-  absence of remote mutation controls.
+  bounded timeouts, disconnect and reconnect, freshness transitions, strict
+  monitoring/control credential separation, exact route and capability gates,
+  idempotent delivery, and honest unknown outcomes.
 - Include desktop and mobile verification for UI changes.
 - Never commit `.env`, `~/.grok` data, session transcripts, credentials, or screenshots containing private source or prompts.
 - Keep package contents under the release-check size and privacy limits.

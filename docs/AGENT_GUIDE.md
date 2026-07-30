@@ -1,8 +1,9 @@
 # Agent guide
 
 Read `README.md`, `docs/architecture.md`, and the milestone document for the
-version being changed before editing. For v0.10, also read
-`docs/v0.10-multi-machine-monitoring.md`.
+version being changed before editing. Fleet or remote-session changes also
+require `docs/v0.10-multi-machine-monitoring.md` and
+`docs/v0.11-secure-remote-sessions.md`.
 
 ## Edit routing
 
@@ -24,9 +25,11 @@ version being changed before editing. For v0.10, also read
 ## Invariants
 
 - Local state and controls remain authoritative on each machine.
-- v0.10 remote behavior is read-only. Do not add remote prompts, approvals,
-  start/pause/resume/interrupt/stop actions, shell execution, arbitrary fetches,
-  endpoint discovery, or destructive routes.
+- The v0.10 monitoring plane remains read-only. The separate v0.11 control
+  plane is limited to managed-session Start, Follow up, advertised permission
+  choices, and Interrupt. Do not add arbitrary shell execution, fetches, file
+  mutation, endpoint discovery, workflow Pause/Resume/Stop, or destructive
+  routes.
 - Remote credentials remain server-side. Never return tokens through browser
   APIs, SSE, errors, diagnostics, screenshots, fixtures, or committed state.
 - Keep registry persistence transactional and separate from
@@ -40,9 +43,10 @@ version being changed before editing. For v0.10, also read
 ## Risk and approval boundaries
 
 Merging, tagging, publishing to npm, and creating a GitHub release require
-explicit user approval. Remote-control work belongs to v0.11 and requires a
-separate security design. Do not use destructive Git commands to clean a dirty
-worktree or overwrite an existing state file to repair it.
+explicit user approval. Any expansion beyond the v0.11 managed-session control
+contract requires a separate security design. Do not use destructive Git
+commands to clean a dirty worktree or overwrite an existing state file to
+repair it.
 
 ## Expected checks
 

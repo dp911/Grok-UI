@@ -73,6 +73,7 @@ import { RuntimeIntelligencePanels } from './views/RuntimeIntelligencePanels'
 import { FleetView } from './views/FleetView'
 import { useModalFocus } from './hooks/useModalFocus'
 import { PrivacyProvider, usePrivacy } from './privacy'
+import { reconcileControlSnapshot } from './control-snapshot'
 import packageJson from '../package.json'
 
 interface NavItem {
@@ -260,7 +261,7 @@ function App() {
         setSetup(null)
       }
       void getControlSnapshot()
-        .then(setControl)
+        .then((next) => setControl((current) => reconcileControlSnapshot(current, next)))
         .catch(() => {
           // Dashboard and onboarding stay available if ACP is not ready yet.
         })
@@ -302,7 +303,8 @@ function App() {
     })
     events.addEventListener('control', (event) => {
       setStreamConnected(true)
-      setControl(JSON.parse((event as MessageEvent).data) as ControlSnapshot)
+      const next = JSON.parse((event as MessageEvent).data) as ControlSnapshot
+      setControl((current) => reconcileControlSnapshot(current, next))
     })
     events.addEventListener('runtime', (event) => {
       setStreamConnected(true)
@@ -418,7 +420,8 @@ function App() {
   }
 
   const refreshControl = useCallback(async () => {
-    setControl(await getControlSnapshot())
+    const next = await getControlSnapshot()
+    setControl((current) => reconcileControlSnapshot(current, next))
   }, [])
 
   const refreshFleet = useCallback(async () => {

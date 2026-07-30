@@ -1,9 +1,9 @@
 # Grok UI roadmap
 
-Grok UI v0.9.0 provides local session discovery, ACP control, confirmed
+Grok UI v0.11.0 provides local session discovery, ACP control, confirmed
 interruption, workflow orchestration, Git and runtime inspection, a persistent
-usage ledger, budgets, and privacy-aware exports. The roadmap extends those
-foundations instead of replacing them.
+usage ledger, multi-machine monitoring, and secure managed remote sessions.
+The roadmap extends those foundations instead of replacing them.
 
 ## v0.8.2 — Release and recovery
 
@@ -36,8 +36,8 @@ The staged design, security constraints, and release gate are tracked in
 - Introduce a lightweight host agent and transactional central host registry.
 - Support authenticated SSH-forwarded and Tailscale-oriented connectivity
   without invoking a shell or probing arbitrary endpoints. SSH readiness,
-  duplicate local-forward prevention, fixed-path parsing, and bounded reads are
-  implemented on the unreleased v0.10 branch.
+  duplicate local-forward prevention, fixed-path parsing, and bounded reads
+  shipped in v0.10.0.
 - Report host identity, Grok UI and agent versions, capabilities, health,
   latency, last seen, and freshness.
 - Make connecting, healthy, degraded, stale, offline, incompatible,
@@ -76,6 +76,8 @@ than widening the initial trust boundary.
 The product contract, failure behavior, security boundaries, and staged
 acceptance matrix are tracked in
 [`v0.11-secure-remote-sessions.md`](./v0.11-secure-remote-sessions.md).
+The managed-session MVP shipped in v0.11.0; workflow lifecycle controls and
+shared/team access remain later additions.
 
 ## v0.12 — VS Code
 
