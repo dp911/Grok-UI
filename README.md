@@ -16,7 +16,9 @@ and move through your complete local history without leaving the browser.
 ![Local first](https://img.shields.io/badge/privacy-local--first-D9FF43?labelColor=111318)
 ![License: MIT](https://img.shields.io/badge/license-MIT-E44738)
 
-<img src="docs/grok-ui-dashboard.png" width="900" alt="Grok UI Event Horizon dashboard with live runtime telemetry"/>
+<a href="https://raw.githubusercontent.com/joeynyc/Grok-UI/main/docs/grok-ui-dashboard.png">
+  <img src="docs/grok-ui-dashboard.png" width="900" alt="Grok UI Event Horizon dashboard with all 12 product areas and Privacy Mode enabled"/>
+</a>
 
 [**Watch the 24-second product tour**](https://github.com/joeynyc/Grok-UI/releases/download/v0.5.1/grok-ui-dashboard-tour-final-white-logo.mp4)
 · [**See what’s new in v0.11.0**](https://github.com/joeynyc/Grok-UI/releases/tag/v0.11.0)
