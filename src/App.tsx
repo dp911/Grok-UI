@@ -71,6 +71,7 @@ import { WorkflowsView } from './views/WorkflowsView'
 import { UsageView } from './views/UsageView'
 import { RuntimeIntelligencePanels } from './views/RuntimeIntelligencePanels'
 import { FleetView } from './views/FleetView'
+import { useModalFocus } from './hooks/useModalFocus'
 import { PrivacyProvider, usePrivacy } from './privacy'
 import packageJson from '../package.json'
 
@@ -97,6 +98,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'memory', index: '11', label: 'Memory', eyebrow: 'Recall', icon: BrainCircuit, shortcut: '9' },
   { id: 'themes', index: '12', label: 'Themes', eyebrow: 'Appearance', icon: Palette, shortcut: '0' },
 ]
+
+const MOBILE_NAV_IDS: ViewId[] = ['live', 'control', 'runs', 'fleet']
 
 type ThemeId = 'operator' | 'event-horizon' | 'minimal-calm'
 
@@ -197,16 +200,24 @@ function App() {
   const [error, setError] = useState('')
   const [fleetError, setFleetError] = useState('')
   const [query, setQuery] = useState('')
-  const [selectedSession, setSelectedSession] = useState<{ id: string; fallback: SessionRow | null } | null>(null)
+  const [selectedSession, setSelectedSession] = useState<{
+    id: string
+    fallback: SessionRow | null
+    opener: HTMLElement | null
+  } | null>(null)
   const [remoteSession, setRemoteSession] = useState<{
     host: FleetHostView
     session: SessionRow
+    opener: HTMLElement | null
   } | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [theme, setTheme] = useState<ThemeId>(storedTheme)
   const [privacyMode, setPrivacyMode] = useState(storedPrivacy)
   const lastAttentionRef = useRef(0)
+  const lastInteractionRef = useRef<HTMLElement | null>(null)
+  const mobileNavTriggerRef = useRef<HTMLElement | null>(null)
+  const mobileNavOpenRef = useRef(false)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -335,21 +346,50 @@ function App() {
     lastAttentionRef.current = attention
   }, [control?.permissions, live?.attentionCount, privacyMode])
 
+  const takeInteractionTarget = useCallback(() => {
+    const interaction = lastInteractionRef.current?.isConnected
+      ? lastInteractionRef.current
+      : null
+    lastInteractionRef.current = null
+    if (interaction) return interaction
+    return document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement
+      : null
+  }, [])
+
+  const openMobileNav = useCallback(() => {
+    mobileNavTriggerRef.current = takeInteractionTarget()
+    mobileNavOpenRef.current = true
+    setMobileNavOpen(true)
+  }, [takeInteractionTarget])
+
+  const closeMobileNav = useCallback(() => {
+    if (!mobileNavOpenRef.current) return
+    mobileNavOpenRef.current = false
+    setMobileNavOpen(false)
+    requestAnimationFrame(() => {
+      const trigger = mobileNavTriggerRef.current
+      mobileNavTriggerRef.current = null
+      if (trigger?.isConnected) trigger.focus()
+    })
+  }, [])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       const typing = target.matches('input, textarea, [contenteditable="true"]')
+      if (selectedSession || remoteSession) return
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setPaletteOpen((open) => !open)
         return
       }
       if (event.key === 'Escape') {
-        setPaletteOpen(false)
-        setSelectedSession(null)
-        setRemoteSession(null)
-        setMobileNavOpen(false)
+        if (paletteOpen) setPaletteOpen(false)
+        else closeMobileNav()
+        return
       }
+      if (paletteOpen || mobileNavOpenRef.current) return
       if (!typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const navItem = NAV_ITEMS.find((item) => item.shortcut === event.key)
         if (navItem) setView(navItem.id)
@@ -361,12 +401,20 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [closeMobileNav, paletteOpen, remoteSession, selectedSession])
 
   const setActiveView = (next: ViewId) => {
+    const focusMain = mobileNavOpenRef.current
+    mobileNavOpenRef.current = false
+    mobileNavTriggerRef.current = null
     setView(next)
     setQuery('')
     setMobileNavOpen(false)
+    if (focusMain) {
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('.main-stage')?.focus()
+      })
+    }
   }
 
   const refreshControl = useCallback(async () => {
@@ -384,17 +432,28 @@ function App() {
   }, [])
 
   const openSession = useCallback((session: SessionRow | string) => {
+    const opener = takeInteractionTarget()
     setSelectedSession(typeof session === 'string'
-      ? { id: session, fallback: data?.sessions.find((item) => item.id === session) || null }
-      : { id: session.id, fallback: session })
-  }, [data?.sessions])
+      ? { id: session, fallback: data?.sessions.find((item) => item.id === session) || null, opener }
+      : { id: session.id, fallback: session, opener })
+  }, [data?.sessions, takeInteractionTarget])
 
   if (authenticated === null) return <BootScreen label="SECURING LOCAL LINK" />
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} />
 
   return (
     <PrivacyProvider enabled={privacyMode}>
-      <div className="app-shell" data-theme={theme} data-privacy={privacyMode ? 'on' : 'off'}>
+      <div
+        className="app-shell"
+        data-theme={theme}
+        data-privacy={privacyMode ? 'on' : 'off'}
+        onClickCapture={(event) => {
+          if (!(event.target instanceof Element)) return
+          lastInteractionRef.current = event.target.closest<HTMLElement>(
+            'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          )
+        }}
+      >
         <AmbientGrid />
         <Sidebar
           active={view}
@@ -402,17 +461,17 @@ function App() {
           version={data?.version || '—'}
           open={mobileNavOpen}
           onNavigate={setActiveView}
-          onClose={() => setMobileNavOpen(false)}
+          onClose={closeMobileNav}
         />
 
-        <main className="main-stage">
+        <main className="main-stage" tabIndex={-1}>
           <TopBar
             active={view}
             connected={streamConnected}
             generatedAt={live?.generatedAt || data?.generatedAt}
             refreshing={refreshing}
             privacyMode={privacyMode}
-            onMenu={() => setMobileNavOpen(true)}
+            onMenu={openMobileNav}
             onPalette={() => setPaletteOpen(true)}
             onRefresh={() => void load(true)}
             onTogglePrivacy={() => setPrivacyMode((enabled) => !enabled)}
@@ -487,7 +546,9 @@ function App() {
                 error={fleetError}
                 onReload={refreshFleet}
                 onFleetChange={setFleet}
-                onOpenRemoteSession={(host, session) => setRemoteSession({ host, session })}
+                onOpenRemoteSession={(host, session) => {
+                  setRemoteSession({ host, session, opener: takeInteractionTarget() })
+                }}
               />
             )}
             {view === 'library' && <LibraryView data={data} query={query} onQuery={setQuery} />}
@@ -497,13 +558,21 @@ function App() {
         )}
         </main>
 
-        <MobileNav active={view} onNavigate={setActiveView} />
+        {!selectedSession && !remoteSession && !paletteOpen && (
+          <MobileNav
+            active={view}
+            onNavigate={setActiveView}
+            onMore={openMobileNav}
+            suspended={mobileNavOpen}
+          />
+        )}
         {selectedSession && (
           <SessionWorkbench
             sessionId={selectedSession.id}
             fallback={data?.sessions.find((item) => item.id === selectedSession.id) || selectedSession.fallback}
             live={live}
             control={control}
+            returnFocus={selectedSession.opener}
             onClose={() => setSelectedSession(null)}
             onUpdated={() => load(true)}
           />
@@ -515,6 +584,7 @@ function App() {
             transport={remoteSession.host.transport}
             sessionId={remoteSession.session.id}
             fallback={remoteSession.session}
+            returnFocus={remoteSession.opener}
             onClose={() => setRemoteSession(null)}
           />
         )}
@@ -629,6 +699,14 @@ function Sidebar({
   onNavigate: (id: ViewId) => void
   onClose: () => void
 }) {
+  const dialogRef = useModalFocus<HTMLElement>(
+    onClose,
+    '.sidebar-close',
+    undefined,
+    open,
+    false,
+  )
+
   return (
     <>
       <button
@@ -636,7 +714,14 @@ function Sidebar({
         aria-label="Close navigation"
         onClick={onClose}
       />
-      <aside className={`sidebar ${open ? 'is-open' : ''}`}>
+      <aside
+        ref={dialogRef}
+        className={`sidebar ${open ? 'is-open' : ''}`}
+        role={open ? 'dialog' : undefined}
+        aria-modal={open ? 'true' : undefined}
+        aria-label={open ? 'Navigation menu' : undefined}
+        tabIndex={open ? -1 : undefined}
+      >
         <div className="brand-lockup">
           <BrandLogo />
           <div>
@@ -649,7 +734,7 @@ function Sidebar({
         </div>
 
         <div className="rail-label">Navigation / 01</div>
-        <nav className="primary-nav" aria-label="Primary navigation">
+        <nav className="primary-nav" id="primary-navigation" aria-label="Primary navigation">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon
             return (
@@ -1790,13 +1875,39 @@ function CommandPalette({
   )
 }
 
-function MobileNav({ active, onNavigate }: { active: ViewId; onNavigate: (view: ViewId) => void }) {
+function MobileNav({
+  active,
+  onNavigate,
+  onMore,
+  suspended,
+}: {
+  active: ViewId
+  onNavigate: (view: ViewId) => void
+  onMore: () => void
+  suspended: boolean
+}) {
+  const primaryItems = NAV_ITEMS.filter((item) => MOBILE_NAV_IDS.includes(item.id))
+  const moreActive = !MOBILE_NAV_IDS.includes(active)
   return (
-    <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-      {NAV_ITEMS.filter((item) => item.id !== 'themes').map((item) => {
+    <nav
+      className={`mobile-bottom-nav ${suspended ? 'is-suspended' : ''}`}
+      aria-label="Mobile navigation"
+      aria-hidden={suspended}
+      inert={suspended}
+    >
+      {primaryItems.map((item) => {
         const Icon = item.icon
         return <button key={item.id} className={active === item.id ? 'is-active' : ''} onClick={() => onNavigate(item.id)}><Icon size={18} /><span>{item.label}</span></button>
       })}
+      <button
+        className={moreActive ? 'is-active' : ''}
+        onClick={onMore}
+        aria-controls="primary-navigation"
+        aria-expanded={suspended}
+      >
+        <Menu size={18} />
+        <span>More</span>
+      </button>
     </nav>
   )
 }

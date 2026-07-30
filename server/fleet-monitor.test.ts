@@ -103,6 +103,7 @@ class MockConnector implements FleetConnector {
   requests: Array<{ token: string; path: string }> = []
   controlEnabled = false
   controlRequests: Array<{ token: string; path: string; body?: unknown }> = []
+  controlReceiptOverride: Record<string, unknown> | null = null
 
   constructor(private readonly advance?: (milliseconds: number) => void) {}
 
@@ -180,6 +181,7 @@ class MockConnector implements FleetConnector {
       updatedAt: '2026-01-01T00:00:00.000Z',
       sessionId: 'session-1',
       error: '',
+      ...this.controlReceiptOverride,
     }
   }
 }
@@ -473,6 +475,79 @@ describe('FleetMonitor', () => {
         `${hosts[0].id}:session-1`,
         { commandId: 'stale-prompt', expiresAt: '2026-01-01T00:10:00.000Z', prompt: 'Do not send' },
       )).rejects.toThrow(/fresh, healthy/i)
+    } finally {
+      await monitor.stop()
+    }
+  })
+
+  it('rejects unscoped and cross-host resource substitution before transport', async () => {
+    const { registry, hosts } = await setup(2)
+    for (const host of hosts) {
+      await registry.update(host.id, {
+        controlToken: `control-${host.id}`,
+        controlEnabled: true,
+      })
+    }
+    const connector = new MockConnector()
+    connector.controlEnabled = true
+    const monitor = new FleetMonitor(registry, connector)
+    await monitor.start()
+    try {
+      const expiresAt = new Date(Date.now() + 60_000).toISOString()
+      connector.controlRequests = []
+      await expect(monitor.promptRemoteSession(
+        hosts[0].id,
+        `${hosts[1].id}:session-1`,
+        { commandId: 'cross-host-prompt', expiresAt, prompt: 'Do not send' },
+      )).rejects.toThrow(/does not belong/i)
+      await expect(monitor.interruptRemoteSession(
+        hosts[0].id,
+        'session-1',
+        { commandId: 'unscoped-interrupt', expiresAt },
+      )).rejects.toThrow(/does not belong/i)
+      await expect(monitor.resolveRemotePermission(
+        hosts[0].id,
+        `${hosts[0].id}:session-1`,
+        `${hosts[1].id}:permission-1`,
+        { commandId: 'cross-host-permission', expiresAt, optionId: 'allow-once' },
+      )).rejects.toThrow(/does not belong/i)
+      expect(connector.controlRequests).toEqual([])
+    } finally {
+      await monitor.stop()
+    }
+  })
+
+  it('rejects receipts substituted by a remote host for another command or session', async () => {
+    const { registry, hosts } = await setup()
+    await registry.update(hosts[0].id, {
+      controlToken: 'control-token',
+      controlEnabled: true,
+    })
+    const connector = new MockConnector()
+    connector.controlEnabled = true
+    const monitor = new FleetMonitor(registry, connector)
+    await monitor.start()
+    try {
+      const expiresAt = new Date(Date.now() + 60_000).toISOString()
+      const sessionId = `${hosts[0].id}:session-1`
+      for (const receiptOverride of [
+        { commandId: 'different-command' },
+        { kind: 'session.interrupt' },
+        { sessionId: 'session-2' },
+        { status: 'invented-status' },
+        { sessionId: '../other-host' },
+      ]) {
+        connector.controlReceiptOverride = receiptOverride
+        await expect(monitor.promptRemoteSession(
+          hosts[0].id,
+          sessionId,
+          {
+            commandId: `receipt-test-${connector.controlRequests.length}`,
+            expiresAt,
+            prompt: 'Do not trust a substituted receipt',
+          },
+        )).rejects.toThrow(/invalid command receipt|different request/i)
+      }
     } finally {
       await monitor.stop()
     }

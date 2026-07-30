@@ -128,4 +128,47 @@ describe('DefaultFleetConnector', () => {
       { commandId: 'command-3' },
     )).rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
   })
+
+  it('rejects a deterministic fuzz corpus of protocol confusion and traversal paths', async () => {
+    const connector = new DefaultFleetConnector()
+    const target = host(9)
+    for (const invalidPath of [
+      '/agent/control/v1/arbitrary',
+      '/agent/control/v1/sessions/session-1/delete',
+      '/agent/control/v1/sessions/session-1/prompt?redirect=1',
+      '/agent/control/v1/sessions/session-1/prompt#fragment',
+      '/agent/control/v1/sessions/%2Fetc/prompt',
+      '/agent/control/v1/sessions/%5Cetc/prompt',
+      '/agent/control/v1/sessions/%00/prompt',
+      '/agent/control/v1/sessions/%F0%9F%92%A5/prompt',
+      '/agent/control/v1/sessions/session-1/permissions/%2E%2E%2Fother',
+      '//attacker.invalid/agent/control/v1/sessions',
+    ]) {
+      await expect(connector.postControlJson(
+        target,
+        invalidPath,
+        { commandId: 'fuzz-command' },
+      ), invalidPath).rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
+    }
+
+    for (const invalidPath of [
+      '/agent/v1/arbitrary',
+      '/agent/v1/hello?unexpected=1',
+      '/agent/v1/sessions/%2Fetc',
+      '/agent/v1/sessions/%00',
+      '/agent/v1/sessions/session-1/extra',
+      '//attacker.invalid/agent/v1/hello',
+    ]) {
+      await expect(
+        connector.getJson(target, invalidPath),
+        invalidPath,
+      ).rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
+    }
+
+    await expect(connector.postControlJson(
+      target,
+      '/agent/control/v1/sessions/session-1/prompt',
+      { commandId: 'oversized-command', prompt: 'x'.repeat(64 * 1024) },
+    )).rejects.toMatchObject<FleetConnectionError>({ kind: 'malformed' })
+  })
 })

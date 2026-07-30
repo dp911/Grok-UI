@@ -8,7 +8,9 @@ import {
   normalizeAgentSnapshot,
   protocolCompatible,
   normalizeAgentHello,
+  normalizeRemoteCommandReceipt,
   normalizeRemoteSessionSnapshot,
+  unscopedId,
 } from './fleet-protocol.js'
 
 function rawSnapshot() {
@@ -184,5 +186,33 @@ describe('fleet protocol normalization', () => {
       controlHandle: '',
       canStop: false,
     })
+  })
+
+  it('rejects malformed command receipts and cross-host scoped identifiers', () => {
+    const receipt = {
+      commandId: 'command-1',
+      kind: 'session.prompt',
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      sessionId: 'session-1',
+      error: '',
+    }
+    expect(normalizeRemoteCommandReceipt(receipt)).toMatchObject(receipt)
+    for (const override of [
+      { commandId: '../command' },
+      { kind: 'arbitrary.shell' },
+      { status: 'pretend-success' },
+      { sessionId: '../session' },
+    ]) {
+      expect(() => normalizeRemoteCommandReceipt({
+        ...receipt,
+        ...override,
+      })).toThrow(/invalid command receipt/i)
+    }
+
+    expect(unscopedId('host-a', 'host-a:session-1')).toBe('session-1')
+    expect(() => unscopedId('host-a', 'host-b:session-1')).toThrow(/does not belong/i)
+    expect(() => unscopedId('host-a', 'session-1')).toThrow(/does not belong/i)
   })
 })

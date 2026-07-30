@@ -223,18 +223,22 @@ test.describe.serial('read-only fleet monitoring', () => {
     await expect(hostRow).toBeVisible()
     await hostRow.click()
     await page.getByRole('tab', { name: 'Sessions' }).click()
+    await page.setViewportSize({ width: 390, height: 844 })
     await page.getByRole('button', { name: /Continue remote session Remote Confidential Phoenix/ }).click()
 
     const remote = page.getByRole('dialog', { name: /Remote session:/ })
     await expect(remote).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toHaveCount(0)
     await expect(remote.getByText('Remote transcript for Example Operator')).toBeVisible()
     await expect(remote.getByText('Allow the remote verification tool?')).toBeVisible()
-    await remote.getByRole('button', { name: 'Allow once' }).click()
+    const allowOnce = remote.getByRole('button', { name: 'Allow once' })
+    expect((await allowOnce.boundingBox())?.height).toBeGreaterThanOrEqual(44)
+    await allowOnce.click()
     await expect(remote.getByText('Permission decision accepted by the remote host.')).toBeVisible()
     await expect(remote.getByText('Allow the remote verification tool?')).toHaveCount(0)
 
     await remote.getByPlaceholder('Continue this Grok Build session…').fill('Continue from my phone')
-    await remote.getByRole('button', { name: 'SEND' }).click()
+    await remote.getByRole('button', { name: 'Send remote follow-up' }).click()
     await expect(remote.getByText('Remote host accepted: Continue from my phone')).toBeVisible({
       timeout: 10_000,
     })

@@ -506,7 +506,10 @@ export function hostScopeSnapshot(hostId: string, snapshot: AgentSnapshot): Agen
 
 export function unscopedId(hostId: string, value: string): string {
   const prefix = `${hostId}:`
-  return value.startsWith(prefix) ? value.slice(prefix.length) : value
+  if (!value.startsWith(prefix) || value.length === prefix.length) {
+    throw new Error('Resource ID does not belong to the selected fleet host.')
+  }
+  return value.slice(prefix.length)
 }
 
 function safeControlSession(value: unknown): Omit<ControlSession, 'workflows'> | null {
@@ -628,23 +631,26 @@ export function normalizeRemoteSessionSnapshot(value: unknown): RemoteSessionSna
 export function normalizeRemoteCommandReceipt(value: unknown): RemoteCommandReceipt {
   const item = record(value)
   const commandId = text(item.commandId, 128)
-  const kind = oneOf(
-    item.kind,
-    ['session.create', 'session.prompt', 'session.interrupt', 'permission.resolve'] as const,
-    'session.prompt',
-  )
-  if (!commandId) throw new Error('Remote host returned an invalid command receipt.')
+  const kinds = ['session.create', 'session.prompt', 'session.interrupt', 'permission.resolve'] as const
+  const statuses = ['accepted', 'completed', 'failed', 'unknown'] as const
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(commandId)
+    || !kinds.includes(item.kind as typeof kinds[number])
+    || !statuses.includes(item.status as typeof statuses[number])
+  ) {
+    throw new Error('Remote host returned an invalid command receipt.')
+  }
+  const sessionId = text(item.sessionId, 160)
+  if (sessionId && !/^[A-Za-z0-9._:-]{1,160}$/.test(sessionId)) {
+    throw new Error('Remote host returned an invalid command receipt.')
+  }
   return {
     commandId,
-    kind,
-    status: oneOf(
-      item.status,
-      ['accepted', 'completed', 'failed', 'unknown'] as const,
-      'unknown',
-    ),
+    kind: item.kind as typeof kinds[number],
+    status: item.status as typeof statuses[number],
     createdAt: date(item.createdAt),
     updatedAt: date(item.updatedAt),
-    sessionId: text(item.sessionId, 160),
+    sessionId,
     error: text(item.error, 500),
   }
 }

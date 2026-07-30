@@ -1,5 +1,5 @@
 import { Activity, AlertTriangle, ChevronRight, LoaderCircle, MessageSquare, Play, X } from 'lucide-react'
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { getFleetSessionDetail, startRemoteSession } from '../../../api'
 import { usePrivacy } from '../../../privacy'
 import type { AgentSessionDetail, FleetHostView, SessionRow } from '../../../types'
@@ -9,6 +9,22 @@ import { elapsedLabel, exactTime, integer, sessions } from '../model'
 interface PendingCommand {
   commandId: string
   expiresAt: string
+}
+
+const PHONE_MEDIA_QUERY = '(max-width: 680px)'
+
+function usePhoneLayout() {
+  const [phoneLayout, setPhoneLayout] = useState(() => window.matchMedia(PHONE_MEDIA_QUERY).matches)
+
+  useEffect(() => {
+    const media = window.matchMedia(PHONE_MEDIA_QUERY)
+    const update = () => setPhoneLayout(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  return phoneLayout
 }
 
 function newCommand(): PendingCommand {
@@ -26,6 +42,7 @@ export function FleetSessions({
   onOpenRemoteSession: (host: FleetHostView, session: SessionRow) => void
 }) {
   const privacy = usePrivacy()
+  const phoneLayout = usePhoneLayout()
   const observed = sessions(host)
   const [detail, setDetail] = useState<AgentSessionDetail | null>(null)
   const [loadingId, setLoadingId] = useState('')
@@ -134,7 +151,7 @@ export function FleetSessions({
             </div>
           )}
           {error && <div className="fleet-partial-note" role="alert"><AlertTriangle size={14} /> {privacy.content(error)}</div>}
-          <div className="fleet-table-wrap">
+          {!phoneLayout && <div className="fleet-table-wrap">
             <table className="fleet-table fleet-session-table">
               <caption className="sr-only">Read-only sessions observed on this host</caption>
               <thead><tr><th>Status</th><th>Session</th><th>Workspace</th><th>Model</th><th>Turns</th><th>Updated</th><th><span className="sr-only">Inspect</span></th></tr></thead>
@@ -174,7 +191,64 @@ export function FleetSessions({
                 ))}
               </tbody>
             </table>
-          </div>
+          </div>}
+          {phoneLayout && <div className="fleet-session-cards" role="list" aria-label="Sessions observed on this host">
+            {observed.map((session) => {
+              const title = privacy.sessionTitle(session.title, `${host.id}:${session.id}`)
+              const managed = canControl && managedSessionIds.has(session.id)
+              return (
+                <article className="fleet-session-card" role="listitem" key={`mobile:${host.id}:${session.id}`}>
+                  <header>
+                    <span className={`fleet-session-state state-${session.status}`}><i /> {session.status}</span>
+                    <time title={exactTime(session.updatedAt)}>{elapsedLabel(session.updatedAt)}</time>
+                  </header>
+                  <div className="fleet-session-card-copy">
+                    <strong>{title}</strong>
+                    <small>{privacy.content(session.summary)}</small>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>Workspace</dt>
+                      <dd>{privacy.workspace(session.workspace || session.cwd)}</dd>
+                    </div>
+                    <div>
+                      <dt>Model</dt>
+                      <dd>{session.model ? privacy.capability(session.model, 'Model') : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>Turns</dt>
+                      <dd>{integer.format(session.turns)}</dd>
+                    </div>
+                  </dl>
+                  <footer>
+                    {managed && (
+                      <button
+                        className="fleet-card-continue"
+                        type="button"
+                        onClick={() => onOpenRemoteSession(host, session)}
+                        aria-label={`Continue remote session ${title}`}
+                      >
+                        <MessageSquare size={15} />
+                        Continue
+                      </button>
+                    )}
+                    <button
+                      className="fleet-card-inspect"
+                      type="button"
+                      onClick={() => void inspect(session)}
+                      disabled={loadingId === session.id}
+                      aria-label={`Inspect read-only session ${title}`}
+                    >
+                      {loadingId === session.id
+                        ? <LoaderCircle className="is-spinning" size={15} />
+                        : <ChevronRight size={15} />}
+                      {loadingId === session.id ? 'Loading' : 'Inspect'}
+                    </button>
+                  </footer>
+                </article>
+              )
+            })}
+          </div>}
           {detail && (
             <section className="fleet-session-detail" aria-label={`Read-only session detail for ${privacy.sessionTitle(detail.session.title, detail.session.id)}`}>
               <header>
