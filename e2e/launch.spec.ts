@@ -187,6 +187,15 @@ test.describe.serial('public launch path', () => {
   })
 
   test('guides a clean installation through missing CLI and ready states', async ({ page }) => {
+    await fs.rm(path.join(grokHome, 'e2e-cli-ready'), { force: true })
+    const reset = await page.request.get('/api/setup?refresh=1')
+    expect(reset.ok()).toBe(true)
+    const resetStatus = await reset.json()
+    expect(resetStatus.ready).toBe(false)
+    expect(resetStatus.checks.find((check: { id: string }) => check.id === 'cli')).toMatchObject({
+      state: 'action',
+      detail: 'Grok CLI is missing or cannot run.',
+    })
     await page.goto('/')
     await expect(page.getByRole('heading', { name: /Zero to live/ })).toBeVisible()
     await expect(page.getByText('FIRST CONTACT / SETUP REQUIRED')).toBeVisible()
@@ -332,20 +341,45 @@ test.describe.serial('public launch path', () => {
     await expect(page.getByText('Preview is offline')).toBeVisible()
   })
 
-  test('launches and approves a managed ACP control session', async ({ page }) => {
+  test('launches and approves a managed ACP control session', async ({ page }, testInfo) => {
+    const instruction = `Run the public release verification attempt ${testInfo.repeatEachIndex + 1}-${testInfo.retry + 1}`
     await page.goto('/')
     await page.getByRole('button', { name: /Control/ }).click()
 
     await expect(page.getByText('ACP CONTROL LINKED')).toBeVisible({ timeout: 10_000 })
     await page.getByLabel('WORKSPACE').fill(workspace)
-    await page.getByLabel('INSTRUCTION').fill('Run the public release verification')
+    await page.getByLabel('INSTRUCTION').fill(instruction)
     await page.getByRole('button', { name: 'LAUNCH AGENT' }).click()
 
     await expect(page.getByText('New Grok lane launched.')).toBeVisible()
-    await expect(page.getByText('Write the verified fixture')).toBeVisible()
-    await page.getByRole('button', { name: 'Allow once' }).click()
-    await expect(page.getByText('Permission approved and command completed.')).toBeVisible()
-    await expect(page.getByText('20', { exact: true })).toBeVisible()
+    const lane = page.locator('.lane-card').filter({ hasText: instruction })
+    const approval = page.locator('.approval-card').filter({ hasText: 'Write the verified fixture' }).last()
+    await expect(approval).toBeVisible()
+    await approval.getByRole('button', { name: 'Allow once' }).click()
+
+    await expect.poll(async () => {
+      const snapshot = await (await page.request.get('/api/control')).json()
+      const session = snapshot.sessions.find((item: { title: string }) =>
+        item.title === instruction)
+      return session ? {
+        state: session.state,
+        totalTokens: session.totalTokens,
+        pendingPermissions: snapshot.permissions.filter(
+          (permission: { sessionId: string }) => permission.sessionId === session.id,
+        ).length,
+      } : null
+    }, {
+      timeout: 30_000,
+      intervals: [100, 250, 500],
+    }).toEqual({
+      state: 'idle',
+      totalTokens: 20,
+      pendingPermissions: 0,
+    })
+    await expect(page.locator('.managed-stream')
+      .getByText('Permission approved and command completed.')
+      .last()).toBeVisible()
+    await expect(lane.getByText('20', { exact: true })).toBeVisible()
   })
 
   test('recovers the ACP control channel after its child process exits', async ({ page }) => {
